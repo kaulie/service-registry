@@ -57,8 +57,17 @@ func TestOpsEndpointsAndPanel(t *testing.T) {
 	if !strings.Contains(html, "Service Registry") || !strings.Contains(html, "服务目录") {
 		t.Fatalf("面板 HTML 异常：%s", trunc(html, 200))
 	}
-	if js := e.getRaw(t, "/panel/app.js"); !strings.Contains(js, "/v1/snapshot") {
-		t.Error("面板 JS 未包含拉取用法示例")
+	// 面板必须能用图形界面**登记服务**与**新增实例**（曾漏掉，回归护栏）。
+	for _, want := range []string{"＋ 登记服务契约", "＋ 新增实例", "声明式批量同步", "openapi: 3.0.3"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("面板 HTML 缺少新增服务/实例的入口：%q", want)
+		}
+	}
+	js := e.getRaw(t, "/panel/app.js")
+	for _, want := range []string{"/v1/snapshot", "submitServiceForm", "svc-form-submit", "inst-batch-submit", "openServiceForm"} {
+		if !strings.Contains(js, want) {
+			t.Errorf("面板 JS 缺少 %q", want)
+		}
 	}
 	if css := e.getRaw(t, "/panel/styles.css"); len(css) < 100 {
 		t.Errorf("面板 CSS 异常：%d 字节", len(css))

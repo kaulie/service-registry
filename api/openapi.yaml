@@ -10,10 +10,13 @@ info:
     也不保证实例可达。** 可达性由消费方自行校验（契约里的 `healthPath` 只是元信息）。
 
     鉴权：
-      - 写接口（注册/维护/管理）需要令牌：`Authorization: Bearer <token>` 或 `X-Registry-Token`。
-        `admin token` 全权；`namespace token` 只能写自己那个命名空间。
-      - 读接口默认开放（便于各平台拉取），可用 `REGISTRY_READ_AUTH=token` 收紧。
-      - 未配置 admin token 时是**本机开发模式**：写接口不鉴权。
+      - 读接口默认开放（`REGISTRY_READ_AUTH=open`），便于各平台拉取元信息。
+      - **写接口默认开放**（`REGISTRY_WRITE_AUTH=open`）：不带令牌也能登记/维护，actor 记为
+        anonymous。收紧方式是把该变量设为 `token`（重启即可，令牌无需重新分发）：
+        此时写接口需要 `Authorization: Bearer <token>` 或 `X-Registry-Token`，
+        `admin token` 全权，`namespace token` 只能写自己那个命名空间。
+      - 无论开关如何：带了合法令牌就按身份记账（审计里能看出是谁改的）；带了非法令牌一律 403。
+      - 当前状态随时可从 GET /v1/meta 的 `writeAuth` 字段读到。
     error 响应统一为 `{"error":{"code":"...","message":"..."}}`。
 servers:
   - url: http://127.0.0.1:4240
@@ -61,7 +64,7 @@ paths:
   /v1/meta:
     get:
       tags: [ops]
-      summary: 运行期元信息（版本、计数、当前 revision、语义声明）
+      summary: 运行期元信息（版本、计数、当前 revision、写权限状态、语义声明）
       responses:
         '200':
           description: 元信息

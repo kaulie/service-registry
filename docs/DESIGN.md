@@ -149,12 +149,18 @@ port ∈ [1,65535]；metadata ≤64 条、键 ≤128/值 ≤1024 字节。
 
 ## 6. 安全模型
 
-- **写**：`Authorization: Bearer <t>` 或 `X-Registry-Token`。
-  admin 令牌全权；命名空间令牌只能写自己那个命名空间；令牌只存 sha256，比较用
-  `subtle.ConstantTimeCompare`。
+- **写**：`Authorization: Bearer <t>` 或 `X-Registry-Token`；令牌只存 sha256，
+  比较用 `subtle.ConstantTimeCompare`。admin 令牌全权；命名空间令牌只能写自己那个命名空间。
+- **写接口默认开放**（`REGISTRY_WRITE_AUTH=open`，按需求设定）：不带令牌也能登记/维护/管理，
+  `actor=anonymous`。这是**刻意的默认值**（本机/内网先把链路跑通），但必须显式可见：
+  启动打 WARN、`/v1/meta.writeAuth` 暴露、面板显示黄色徽标。收紧是一步操作
+  （`.env` 改 `token` 后重启），令牌无需重新分发。
+  开放不等于不认令牌：带合法令牌按身份记账（审计里能区分 `admin`/`ns:<name>`），
+  带**非法**令牌一律 403 —— 不静默忽略一个错误的令牌。
+  风险要说清楚：本服务是**唯一真源**，写接口一旦暴露给不可信网络，就等于允许任何人
+  **向全局发现结果里投毒**（伪造地址/API）。所以绑定默认是 `127.0.0.1`。
 - **读**：默认开放（`REGISTRY_READ_AUTH=open`），因为消费方是多个平台；
   需要收紧时改为 `token`。运维端点（`/health` `/healthz` `/readyz` `/metrics`）始终开放。
-- **未配置 admin 令牌 = 开发模式**：写接口不鉴权（`actor=anonymous`）。生产必须配置。
 - `DELETE /v1/namespaces/{ns}?confirm={ns}`：破坏性操作要求显式确认。
 - 单条内联 spec ≤ `REGISTRY_MAX_SPEC_BYTES`（默认 256KB），请求体硬上限 1MB，
   端点数上限 2000，单次实例同步上限 500 —— 都是为了防止畸形输入把库撑爆。
@@ -171,6 +177,7 @@ port ∈ [1,65535]；metadata ≤64 条、键 ≤128/值 ≤1024 字节。
 | 自动抓取 `specUrl` 做变更检测/兼容性告警 | 引入出网与定时任务（SSRF 面、外部依赖），且与"存储中心"的定位不符。`specHash` 已足够让消费方自己做 diff |
 | 独立前端工程（React/Vite） | 面板只需要"列表 + 表格 + 表单 + SSE"，原生 HTML/CSS/JS 零构建步骤、`go:embed` 进单二进制，部署时不存在"前端资源没跟上"的问题（与生态里部署面板的做法一致） |
 | 多节点集群 / 选主 / federation | 定位是**唯一真源**的单实例服务；引入分布式一致性会显著放大复杂度，而当前收益为零 |
+| 写接口默认要求令牌 | 需求方要求"先默认开放写权限"：唯一的真源上开放写入本身是风险（等于允许投毒），但先把链路跑通更重要。折中做法是**开放但显式可见**（启动 WARN + `/v1/meta.writeAuth` + 面板黄徽标），并把收紧做成**一个 flag**（`REGISTRY_WRITE_AUTH=token`，令牌早已生成、无需重新分发），而不是靠"删掉令牌"这种不可逆的手法 |
 
 ## 8. 路线图（M2+，都未实现）
 

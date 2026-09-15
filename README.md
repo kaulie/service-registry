@@ -31,7 +31,9 @@
 # 1. 本机跑起来（零依赖：单二进制 + SQLite，监听 127.0.0.1:4240）
 go run ./cmd/registryd
 #   控制面板：http://127.0.0.1:4240/panel/
-#   数据：./data/registry.db     未设置 REGISTRY_ADMIN_TOKEN 时是开发模式（写接口不鉴权）
+#   数据：./data/registry.db
+#   ⚠️ 写接口**默认开放**（REGISTRY_WRITE_AUTH=open）：不带令牌即可登记/维护。
+#      收紧：REGISTRY_WRITE_AUTH=token 重启即可（客户端带 admin / 命名空间令牌）。
 
 # 2. 或用容器
 cd deploy && docker compose up --build
@@ -159,11 +161,19 @@ done
 |---|---|
 | `REGISTRY_ADMIN_TOKEN`（admin） | 全权：任意命名空间读写、创建/删除命名空间、轮换令牌 |
 | 命名空间令牌（建命名空间时返回） | **只**能写自己那个命名空间的服务与实例 |
-| 无令牌 | 读接口默认可用（便于平台拉取）；写接口 401/403 |
+| 不带令牌 | 读接口默认可用（便于平台拉取）；**写接口默认也开放**（见下） |
 
-- 令牌只存 sha256 哈希，明文仅在创建/轮换时返回一次。
-- 读接口可用 `REGISTRY_READ_AUTH=token` 收紧；`/health` `/healthz` `/readyz` `/metrics` 始终开放。
-- 未配置 admin 令牌 = 本机开发模式：写接口不鉴权（`actor=anonymous`）。生产请务必配置。
+**写接口默认开放**（`REGISTRY_WRITE_AUTH=open`，本次按需求设定）：不带令牌即可登记/修改/删除。
+代价很直白 —— 本服务是**唯一的元信息真源**，开放写入意味着**谁能连上谁就能投毒**（伪造服务地址/API）。
+所以：
+
+- 启动日志会打印 **WARN**，`/v1/meta` 暴露 `writeAuth`，面板右上角显示**黄色徽标**，不会悄悄开放；
+- 开放 ≠ 不认令牌：带了**合法**令牌仍按身份记账（审计里能看到 `admin` / `ns:<name>`）；
+  带了**非法**令牌一律 `403`（不静默忽略）；
+- **收紧只需一步**：`backend/.env` 里把 `REGISTRY_WRITE_AUTH` 改成 `token` 再重启，
+  客户端带 admin 或命名空间令牌即可 —— 令牌早就在 `.env` 里生成了，不用重新分发；
+- 读接口可用 `REGISTRY_READ_AUTH=token` 单独收紧；`/health` `/healthz` `/readyz` `/metrics` 始终开放。
+- 令牌只存 sha256 哈希，明文仅在创建/轮换时返回一次；服务绑定 `127.0.0.1`，不对外网暴露。
 - `DELETE /v1/namespaces/{ns}?confirm={ns}` 才允许删除命名空间（连带其服务与实例）。
 
 ## API 一览
@@ -202,7 +212,8 @@ done
 | `REGISTRY_HTTP_ADDR` | `127.0.0.1:$PORT`（PORT 默认 4240） | 监听地址 |
 | `REGISTRY_BIND` | `127.0.0.1` | 未显式给地址时用的绑定 IP |
 | `REGISTRY_DB_PATH` | `./data/registry.db` | SQLite 路径（`:memory:` 用于测试） |
-| `REGISTRY_ADMIN_TOKEN` | 空 | admin 令牌；**为空=开发模式（写接口不鉴权）** |
+| `REGISTRY_ADMIN_TOKEN` | 空* | admin 令牌；合法令牌会被记入审计（`actor=admin`） |
+| `REGISTRY_WRITE_AUTH` | **`open`** | 写接口是否要令牌：`open`（默认，无需令牌） / `token`（需令牌） |
 | `REGISTRY_READ_AUTH` | `open` | 读接口是否要令牌（`open` / `token`） |
 | `REGISTRY_DEFAULT_NS` | `default` | 启动时自动播种的命名空间（空则不播种） |
 | `REGISTRY_MAX_SPEC_BYTES` | `262144` | 单个服务内联 OpenAPI 原文大小上限 |
@@ -212,6 +223,10 @@ done
 | `REGISTRY_CHANGE_RETENTION_DAYS` | `0` | >0 时每日清理超期变更/审计记录；0=永久保留 |
 | `REGISTRY_SHUTDOWN_TIMEOUT` | `10s` | 优雅退出等待 |
 | `REGISTRY_LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
+
+\* 部署脚本 `scripts/start.sh` 首次启动会自动生成一个随机 `REGISTRY_ADMIN_TOKEN` 写进
+`backend/.env`（0600）。写接口默认开放，因此**这个默认配置不要暴露到非可信网络**：
+改成 `REGISTRY_WRITE_AUTH=token` 重启即可收紧。
 
 非法取值会**启动即失败**（不会带着错误配置假装跑起来）。
 

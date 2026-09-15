@@ -43,8 +43,12 @@ if [ ! -f "${ENV_FILE}" ]; then
   TOKEN="$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
   cat > "${ENV_FILE}" <<EOF
 # service-registry 运行期配置（首次启动自动生成，权限 600，请勿提交到 git）
-# 管理令牌：命名空间创建/令牌轮换/命名空间删除需要它；为空则写接口不鉴权（仅本机开发）。
+# 管理令牌：合法令牌会被记进审计（actor=admin / ns:<name>）；令牌本身永不出库。
 REGISTRY_ADMIN_TOKEN=${TOKEN}
+# 写接口是否要求令牌。默认 open：不带令牌也能登记（本机/内网先跑通链路）。
+# 收紧：改成 token 再重启；客户端带 REGISTRY_ADMIN_TOKEN 或命名空间令牌即可。
+# 注意 open 时任何人都能往这个唯一真源里写数据，暴露到非可信网络前务必收紧。
+REGISTRY_WRITE_AUTH=open
 # 读接口是否也要求令牌（默认 open：便于各平台拉取元信息）
 REGISTRY_READ_AUTH=open
 # 变更/审计记录保留天数，0 = 永久保留
@@ -62,6 +66,11 @@ set -a; . "${ENV_FILE}"; set +a
 # 平台注入的值优先：端口永远跟随服务契约的 healthUrl。
 export REGISTRY_HTTP_ADDR="${REGISTRY_BIND:-127.0.0.1}:${PORT}"
 export REGISTRY_DB_PATH="${REGISTRY_DB_PATH:-${DATA_DIR}/registry.db}"
+
+# 写接口默认开放（与代码默认一致）；显式导出，避免 .env 里没写时行为不明。
+# 收紧方式：在 backend/.env 里把 REGISTRY_WRITE_AUTH 改成 token 再重启。
+: "${REGISTRY_WRITE_AUTH:=open}"
+export REGISTRY_WRITE_AUTH
 
 # 已在运行则不重复拉起（平台重启前都会先 stop，这里是防御性检查）。
 if [ -f "${PID_FILE}" ]; then

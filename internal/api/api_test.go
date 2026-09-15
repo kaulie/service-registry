@@ -31,6 +31,7 @@ func newEnv(t *testing.T, mutate func(*config.Config)) *testEnv {
 		HTTPAddr:         "127.0.0.1:0",
 		DBPath:           filepath.Join(t.TempDir(), "test.db"),
 		AdminToken:       testAdminToken,
+		WriteAuthOpen:    false, // 测试基线取最严格：写接口必须带令牌
 		DefaultNamespace: "default",
 		PullDefaultLimit: 100,
 		PullMaxLimit:     1000,

@@ -103,6 +103,17 @@ async function renderOverview() {
   }
   if (!meta.ok) { toast('读取 /v1/meta 失败：' + JSON.stringify(meta.data), true); return; }
   const m = meta.data;
+  const wa = $('#write-auth-badge');
+  if (m.writeAuth === 'open') {
+    wa.textContent = '写接口开放（无需令牌）';
+    wa.className = 'badge badge--warn';
+    wa.title = 'REGISTRY_WRITE_AUTH=open：任何人都能登记/修改/删除元信息。'
+      + '收紧方式：backend/.env 里改成 token 后重启。';
+  } else {
+    wa.textContent = '写接口需令牌';
+    wa.className = 'badge badge--ok';
+    wa.title = 'REGISTRY_WRITE_AUTH=token：写操作需要 admin 令牌或命名空间令牌。';
+  }
   $('#meta-version').textContent = 'v' + m.version;
   $('#meta-revision').textContent = 'revision ' + m.revision;
   $('#meta-uptime').textContent = 'uptime ' + m.uptimeSeconds + 's';
@@ -234,6 +245,16 @@ function serviceCard(svc) {
     document.querySelector('.tab[data-tab="instances"]').click();
   });
   actions.appendChild(instBtn);
+  const editBtn = el('button', 'btn btn--small', '编辑契约');
+  editBtn.addEventListener('click', () => openServiceForm(svc));
+  actions.appendChild(editBtn);
+  const addInstBtn = el('button', 'btn btn--small', '＋ 加实例');
+  addInstBtn.addEventListener('click', () => {
+    $('#inst-service').value = svc.namespace + '/' + svc.name;
+    document.querySelector('.tab[data-tab="instances"]').click();
+    openInstanceForm();
+  });
+  actions.appendChild(addInstBtn);
   const del = el('button', 'btn btn--small btn--danger', '删除契约');
   del.addEventListener('click', async () => {
     if (!confirm(`确认删除 ${svc.namespace}/${svc.name}（连带其实例与端点索引）？`)) return;
@@ -486,7 +507,229 @@ function toggleStream() {
   };
 }
 
-// ---- 事件绑定与启动 ----
+// ---- 面板写入口：登记 / 编辑服务契约 ----
+function show(node, on) { node.hidden = !on; }
+function parseList(s) {
+  return String(s || '').split(',').map((x) => x.trim()).filter(Boolean);
+}
+function parseKV(s) {
+  const out = {};
+  parseList(s).forEach((pair) => {
+    const i = pair.indexOf('=');
+    if (i > 0) out[pair.slice(0, i).trim()] = pair.slice(i + 1).trim();
+  });
+  return out;
+}
+function errText(data) {
+  if (data && data.error && data.error.message) return data.error.message;
+  return JSON.stringify(data);
+}
+async function fetchText(path) {
+  const res = await fetch(path, { headers: { ...authHeaders() } });
+  return res.ok ? res.text() : '';
+}
+
+async function fillNamespaceSelect(prefer) {
+  const sel = $('#svc-form-ns');
+  const res = await api('/v1/namespaces');
+  const list = (res.ok && res.data.namespaces) || [];
+  sel.innerHTML = list.map((n) => `<option value="${esc(n.name)}">${esc(n.name)}</option>`).join('');
+  if (prefer && list.some((n) => n.name === prefer)) sel.value = prefer;
+  return list;
+}
+
+function epRow(ep) {
+  const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><select class="ep-method">${methods.map((m) =>
+      `<option${ep && ep.method === m ? ' selected' : ''}>${m}</option>`).join('')}</select></td>
+    <td><input class="ep-path" placeholder="/v1/things/{id}" value="${esc(ep ? ep.path : '')}" /></td>
+    <td><input class="ep-summary" placeholder="说明" value="${esc(ep && ep.summary ? ep.summary : '')}" /></td>
+    <td><button class="btn btn--small btn--danger" type="button">删</button></td>`;
+  tr.querySelector('button').addEventListener('click', () => tr.remove());
+  return tr;
+}
+
+function setEpRows(list) {
+  const tbody = $('#svc-form-eps tbody');
+  tbody.innerHTML = '';
+  (list && list.length ? list : [null]).forEach((ep) => tbody.appendChild(epRow(ep)));
+}
+
+function setApiMode(mode) {
+  $('#svc-form-mode').value = mode;
+  show($('#svc-form-spec-wrap'), mode === 'spec');
+  show($('#svc-form-manual-wrap'), mode === 'manual');
+}
+
+// openServiceForm(null) = 登记新服务；传服务对象 = 编辑（服务名不可改：它是身份）。
+async function openServiceForm(svc) {
+  await fillNamespaceSelect(svc ? svc.namespace : undefined);
+  const f = {
+    ns: $('#svc-form-ns'), name: $('#svc-form-name'), version: $('#svc-form-version'),
+    owner: $('#svc-form-owner'), health: $('#svc-form-health'), desc: $('#svc-form-desc'),
+    tags: $('#svc-form-tags'), docs: $('#svc-form-docs'), specurl: $('#svc-form-specurl'),
+    spec: $('#svc-form-spec'),
+  };
+  if (svc) {
+    $('#svc-form-title').textContent = `编辑服务契约 ${svc.namespace}/${svc.name}`;
+    f.ns.value = svc.namespace;
+    f.name.value = svc.name;
+    f.name.disabled = true;
+    f.version.value = svc.version || '';
+    f.owner.value = svc.owner || '';
+    f.health.value = svc.healthPath || '';
+    f.desc.value = svc.description || '';
+    f.tags.value = (svc.tags || []).join(',');
+    f.docs.value = (svc.api && svc.api.docsUrl) || '';
+    f.specurl.value = (svc.api && svc.api.specUrl) || '';
+    f.spec.value = '';
+    if (svc.api && svc.api.hasSpec) {
+      const raw = await fetchText(`/v1/namespaces/${encodeURIComponent(svc.namespace)}/services/${encodeURIComponent(svc.name)}/spec`);
+      f.spec.value = raw;
+      setApiMode('spec');
+    } else {
+      setEpRows(svc.api ? svc.api.endpoints : []);
+      setApiMode('manual');
+    }
+  } else {
+    $('#svc-form-title').textContent = '登记服务契约';
+    f.name.disabled = false;
+    ['name', 'version', 'owner', 'health', 'desc', 'tags', 'docs', 'specurl', 'spec'].forEach((k) => { f[k].value = ''; });
+    setEpRows(null);
+    setApiMode('spec');
+  }
+  $('#svc-form-hint').textContent = '';
+  show($('#svc-form-card'), true);
+  show($('#inst-form-card'), false);
+  show($('#inst-batch-card'), false);
+}
+
+async function submitServiceForm() {
+  const ns = $('#svc-form-ns').value;
+  const name = $('#svc-form-name').value.trim();
+  const hint = $('#svc-form-hint');
+  if (!ns || !name) { hint.textContent = '命名空间与服务名必填'; return; }
+
+  const apiPart = { protocols: ['http'] };
+  const docs = $('#svc-form-docs').value.trim();
+  const specurl = $('#svc-form-specurl').value.trim();
+  if (docs) apiPart.docsUrl = docs;
+  if (specurl) apiPart.specUrl = specurl;
+
+  if ($('#svc-form-mode').value === 'spec') {
+    const spec = $('#svc-form-spec').value;
+    if (!spec.trim()) { hint.textContent = '请粘贴 OpenAPI 原文，或切到「手工声明端点」'; return; }
+    apiPart.spec = spec;
+  } else {
+    const eps = [...document.querySelectorAll('#svc-form-eps tbody tr')].map((tr) => ({
+      method: tr.querySelector('.ep-method').value,
+      path: tr.querySelector('.ep-path').value.trim(),
+      summary: tr.querySelector('.ep-summary').value.trim(),
+    })).filter((e) => e.path);
+    if (!eps.length) { hint.textContent = '至少声明一个端点'; return; }
+    apiPart.endpoints = eps;
+  }
+
+  const body = {
+    version: $('#svc-form-version').value.trim(),
+    owner: $('#svc-form-owner').value.trim(),
+    description: $('#svc-form-desc').value.trim(),
+    healthPath: $('#svc-form-health').value.trim(),
+    api: apiPart,
+  };
+  const tags = parseList($('#svc-form-tags').value);
+  if (tags.length) body.tags = tags;
+
+  hint.textContent = '提交中…';
+  const res = await api(
+    `/v1/namespaces/${encodeURIComponent(ns)}/services/${encodeURIComponent(name)}`,
+    { method: 'PUT', body });
+  if (!res.ok) { hint.textContent = ''; toast('登记失败：' + errText(res.data), true); return; }
+  toast(`已${res.data.created ? '登记' : '更新'} ${ns}/${name}（${(res.data.service.api.endpoints || []).length} 个端点）`);
+  show($('#svc-form-card'), false);
+  renderServices();
+}
+
+// ---- 面板写入口：新增实例 / 声明式批量同步 ----
+function currentService() {
+  const sel = $('#inst-service').value;
+  if (!sel) { toast('先在上面的下拉里选一个服务', true); return null; }
+  const [ns, svc] = sel.split('/');
+  return { ns, svc, base: `/v1/namespaces/${encodeURIComponent(ns)}/services/${encodeURIComponent(svc)}` };
+}
+
+function openInstanceForm() {
+  const target = currentService();
+  if (!target) return;
+  show($('#svc-form-card'), false);
+  show($('#inst-batch-card'), false);
+  $('#inst-form-title').textContent = `新增实例 → ${target.ns}/${target.svc}`;
+  $('#inst-form-scheme').value = 'http';
+  ['host', 'port', 'meta'].forEach((k) => { $('#inst-form-' + k).value = ''; });
+  $('#inst-form-hint').textContent = '';
+  show($('#inst-form-card'), true);
+}
+
+async function submitInstanceForm() {
+  const target = currentService();
+  if (!target) return;
+  const hint = $('#inst-form-hint');
+  const host = $('#inst-form-host').value.trim();
+  const port = Number($('#inst-form-port').value);
+  if (!host) { hint.textContent = 'host 必填'; return; }
+  if (!port) { hint.textContent = 'port 必填（1-65535）'; return; }
+
+  const body = { scheme: $('#inst-form-scheme').value, host, port };
+  const meta = parseKV($('#inst-form-meta').value);
+  if (Object.keys(meta).length) body.metadata = meta;
+
+  hint.textContent = '提交中…';
+  const res = await api(`${target.base}/instances`, { method: 'POST', body });
+  if (!res.ok) { hint.textContent = ''; toast('新增失败：' + errText(res.data), true); return; }
+  toast(`已登记实例 ${body.scheme}://${host}:${port}`);
+  show($('#inst-form-card'), false);
+  renderInstances();
+}
+
+function openBatchForm() {
+  const target = currentService();
+  if (!target) return;
+  show($('#svc-form-card'), false);
+  show($('#inst-form-card'), false);
+  $('#inst-batch-hint').textContent = '';
+  show($('#inst-batch-card'), true);
+}
+
+async function submitBatchForm() {
+  const target = currentService();
+  if (!target) return;
+  const hint = $('#inst-batch-hint');
+  const raw = $('#inst-batch-json').value.trim();
+  if (!raw) { hint.textContent = '请贴实例数组，例如 [{"scheme":"http","host":"10.0.0.7","port":9099}]'; return; }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    hint.textContent = 'JSON 解析失败：' + e.message;
+    return;
+  }
+  const items = Array.isArray(parsed) ? parsed : (parsed && parsed.instances);
+  if (!Array.isArray(items)) {
+    hint.textContent = '需要数组：直接贴 [ {...} ]，或用 {"instances":[...]} 包一层';
+    return;
+  }
+
+  hint.textContent = '同步中…';
+  const res = await api(`${target.base}/instances`, { method: 'PUT', body: { instances: items } });
+  if (!res.ok) { hint.textContent = ''; toast('同步失败：' + errText(res.data), true); return; }
+  const d = res.data;
+  toast(`同步完成：新增 ${d.created}、更新 ${d.updated}、摘除 ${d.deleted}、未变 ${d.unchanged}`);
+  show($('#inst-batch-card'), false);
+  renderInstances();
+}
+
 $('#svc-refresh').addEventListener('click', renderServices);
 $('#svc-filter').addEventListener('input', renderServices);
 $('#svc-tag-filter').addEventListener('change', renderServices);
@@ -494,6 +737,17 @@ $('#api-search').addEventListener('click', renderSearch);
 $('#api-path').addEventListener('keydown', (e) => { if (e.key === 'Enter') renderSearch(); });
 $('#inst-refresh').addEventListener('click', renderInstances);
 $('#inst-service').addEventListener('change', renderInstances);
+$('#svc-new').addEventListener('click', () => openServiceForm(null));
+$('#svc-form-cancel').addEventListener('click', () => show($('#svc-form-card'), false));
+$('#svc-form-submit').addEventListener('click', submitServiceForm);
+$('#svc-form-ep-add').addEventListener('click', () => $('#svc-form-eps tbody').appendChild(epRow(null)));
+$('#svc-form-mode').addEventListener('change', (e) => setApiMode(e.target.value));
+$('#inst-new').addEventListener('click', openInstanceForm);
+$('#inst-form-cancel').addEventListener('click', () => show($('#inst-form-card'), false));
+$('#inst-form-submit').addEventListener('click', submitInstanceForm);
+$('#inst-batch').addEventListener('click', openBatchForm);
+$('#inst-batch-cancel').addEventListener('click', () => show($('#inst-batch-card'), false));
+$('#inst-batch-submit').addEventListener('click', submitBatchForm);
 $('#chg-refresh').addEventListener('click', renderChanges);
 $('#chg-filter').addEventListener('input', renderChanges);
 $('#stream-toggle').addEventListener('click', toggleStream);

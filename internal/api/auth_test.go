@@ -72,11 +72,48 @@ func TestReadAuthCanBeRequired(t *testing.T) {
 	e.expectStatus(t, http.MethodGet, "/health", "", nil, http.StatusOK)
 }
 
-func TestDevModeWithoutAdminToken(t *testing.T) {
-	e := newEnv(t, func(c *config.Config) { c.AdminToken = "" })
-	out := e.expectStatus(t, http.MethodPost, "/v1/namespaces", "", map[string]any{"name": "dev"}, http.StatusCreated)
+// TestOpenWriteAuth 覆盖"写接口默认开放"（REGISTRY_WRITE_AUTH=open）的语义：
+// 不带令牌能写（actor=anonymous，审计仍可追），带合法令牌按身份记账，带错令牌照样 403。
+func TestOpenWriteAuth(t *testing.T) {
+	e := newEnv(t, func(c *config.Config) { c.WriteAuthOpen = true })
+
+	// 无令牌写：放行，且连管理接口（建命名空间）也放行。
+	out := e.expectStatus(t, http.MethodPost, "/v1/namespaces", "", map[string]any{"name": "open-ns"}, http.StatusCreated)
 	if ns, _ := out["namespace"].(map[string]any); ns == nil {
 		t.Fatalf("响应缺少 namespace：%v", out)
+	}
+	e.expectStatus(t, http.MethodPut, "/v1/namespaces/open-ns/services/svc", "", serviceBody(""), http.StatusCreated)
+
+	// 审计：开放模式下的写入记为 anonymous。
+	changes := e.ok(t, http.MethodGet, "/v1/changes?since=0", nil)["changes"].([]any)
+	if actor := changes[0].(map[string]any)["actor"]; actor != "anonymous" {
+		t.Fatalf("开放模式下无令牌写入应记 anonymous，实际 %v", actor)
+	}
+
+	// 带合法令牌 → 按身份记账（审计里能看出是谁改的）。
+	e.expectStatus(t, http.MethodPut, "/v1/namespaces/open-ns/services/svc", testAdminToken, serviceBody(""), http.StatusOK)
+	changes = e.ok(t, http.MethodGet, "/v1/changes?since=0", nil)["changes"].([]any)
+	last := changes[len(changes)-1].(map[string]any)
+	if last["actor"] != "admin" {
+		t.Fatalf("带 tokens 的写入应记 admin，实际 %v", last["actor"])
+	}
+
+	// 带错令牌：不静默忽略，直接 403。
+	e.expectStatus(t, http.MethodPut, "/v1/namespaces/open-ns/services/svc", "wrong", serviceBody(""), http.StatusForbidden)
+
+	// /v1/meta 暴露当前写权限状态，便于运维与面板显示。
+	if meta := e.ok(t, http.MethodGet, "/v1/meta", nil); meta["writeAuth"] != "open" {
+		t.Fatalf("meta.writeAuth 应为 open：%v", meta["writeAuth"])
+	}
+}
+
+// TestWriteAuthCanBeTightened 覆盖收紧后的行为（REGISTRY_WRITE_AUTH=token）。
+func TestWriteAuthCanBeTightened(t *testing.T) {
+	e := newEnv(t, func(c *config.Config) { c.WriteAuthOpen = false })
+	e.expectStatus(t, http.MethodPost, "/v1/namespaces", "", map[string]any{"name": "x"}, http.StatusUnauthorized)
+	e.expectStatus(t, http.MethodPost, "/v1/namespaces", testAdminToken, map[string]any{"name": "x"}, http.StatusCreated)
+	if meta := e.ok(t, http.MethodGet, "/v1/meta", nil); meta["writeAuth"] != "token" {
+		t.Fatalf("meta.writeAuth 应为 token：%v", meta["writeAuth"])
 	}
 }
 
