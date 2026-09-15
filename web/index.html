@@ -52,10 +52,59 @@
     <!-- 服务目录 -->
     <section id="tab-services" class="tabpanel">
       <div class="actions">
+        <button class="btn btn--primary" id="svc-new">＋ 登记服务契约</button>
         <input type="search" id="svc-filter" placeholder="过滤：名字 / 描述 / owner / version" />
         <select id="svc-tag-filter"><option value="">全部标签</option></select>
         <button class="btn" id="svc-refresh">刷新</button>
       </div>
+
+      <div class="form-card" id="svc-form-card" hidden>
+        <h2 id="svc-form-title">登记服务契约</h2>
+        <div class="form-row">
+          <label>命名空间 <select id="svc-form-ns"></select></label>
+          <label>服务名 <input type="text" id="svc-form-name" placeholder="event-center" /></label>
+          <label>版本 <input type="text" id="svc-form-version" placeholder="1.4.2" /></label>
+          <label>owner <input type="text" id="svc-form-owner" placeholder="kaulie" /></label>
+          <label>healthPath <input type="text" id="svc-form-health" placeholder="/health" /></label>
+        </div>
+        <div class="form-row">
+          <label class="grow">描述 <input type="text" id="svc-form-desc" placeholder="一句话说明这个服务是干什么的" /></label>
+          <label class="grow">标签（逗号分隔） <input type="text" id="svc-form-tags" placeholder="events,pubsub" /></label>
+          <label class="grow">文档链接 <input type="text" id="svc-form-docs" placeholder="https://…" /></label>
+        </div>
+        <div class="form-row">
+          <label>API 来源
+            <select id="svc-form-mode">
+              <option value="spec">粘贴 OpenAPI（推荐，自动解析端点）</option>
+              <option value="manual">手工声明端点</option>
+            </select>
+          </label>
+          <label class="grow">外部 spec 链接（可选，只存不抓取） <input type="text" id="svc-form-specurl" placeholder="https://…/openapi.yaml" /></label>
+        </div>
+
+        <div id="svc-form-spec-wrap">
+          <label class="stack">OpenAPI 3.x / Swagger 2.0 原文（YAML 或 JSON）
+            <textarea id="svc-form-spec" rows="10" spellcheck="false"
+              placeholder="openapi: 3.0.3&#10;info:&#10;  title: event-center&#10;  version: 0.1.0&#10;paths:&#10;  /health:&#10;    get:&#10;      summary: 健康检查"></textarea>
+          </label>
+          <p class="note">服务端会解析出端点索引并存 sha256；原文随时可从「下载 OpenAPI」取回。</p>
+        </div>
+
+        <div id="svc-form-manual-wrap" hidden>
+          <table id="svc-form-eps">
+            <thead><tr><th style="width:110px">方法</th><th>路径</th><th>说明</th><th style="width:60px"></th></tr></thead>
+            <tbody></tbody>
+          </table>
+          <button class="btn btn--small" id="svc-form-ep-add" type="button">＋ 加一行</button>
+        </div>
+
+        <div class="actions" style="margin-top:12px">
+          <button class="btn btn--primary" id="svc-form-submit">提交</button>
+          <button class="btn" id="svc-form-cancel">取消</button>
+          <span class="muted" id="svc-form-hint"></span>
+        </div>
+      </div>
+
       <div id="svc-list" class="list"></div>
     </section>
 
@@ -83,8 +132,45 @@
     <section id="tab-instances" class="tabpanel">
       <div class="actions">
         <select id="inst-service"><option value="">选择一个服务…</option></select>
+        <button class="btn btn--primary" id="inst-new">＋ 新增实例</button>
+        <button class="btn" id="inst-batch">声明式批量同步</button>
         <button class="btn" id="inst-refresh">刷新</button>
       </div>
+
+      <div class="form-card" id="inst-form-card" hidden>
+        <h2 id="inst-form-title">新增实例</h2>
+        <div class="form-row">
+          <label>scheme
+            <select id="inst-form-scheme">
+              <option>http</option><option>https</option><option>tcp</option><option>tls</option>
+            </select>
+          </label>
+          <label>host <input type="text" id="inst-form-host" placeholder="10.0.0.7 或 api.example.com" /></label>
+          <label>port <input type="number" id="inst-form-port" placeholder="9099" min="1" max="65535" /></label>
+          <label class="grow">metadata（k=v，逗号分隔） <input type="text" id="inst-form-meta" placeholder="zone=edge,tier=web" /></label>
+        </div>
+        <p class="note">只登记元信息：本中心不会去访问这个地址，可达性由调用方自行校验。</p>
+        <div class="actions" style="margin-top:8px">
+          <button class="btn btn--primary" id="inst-form-submit">提交</button>
+          <button class="btn" id="inst-form-cancel">取消</button>
+          <span class="muted" id="inst-form-hint"></span>
+        </div>
+      </div>
+
+      <div class="form-card" id="inst-batch-card" hidden>
+        <h2>声明式批量同步（整组对齐）</h2>
+        <p class="note">贴一个实例数组，服务端做 diff：补齐缺失的、更新变化的、<b>摘除多余的</b>（幂等，适合 CI/部署流水线一次性调用）。</p>
+        <label class="stack">实例数组（JSON）
+          <textarea id="inst-batch-json" rows="8" spellcheck="false"
+            placeholder='[&#10;  {"scheme":"http","host":"10.0.0.7","port":9099,"metadata":{"zone":"edge"}}&#10;]'></textarea>
+        </label>
+        <div class="actions" style="margin-top:8px">
+          <button class="btn btn--primary" id="inst-batch-submit">同步</button>
+          <button class="btn" id="inst-batch-cancel">取消</button>
+          <span class="muted" id="inst-batch-hint"></span>
+        </div>
+      </div>
+
       <div id="inst-list" class="list"></div>
     </section>
 
