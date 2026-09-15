@@ -1,0 +1,17 @@
+# Build output
+/bin/
+/outputs/
+# A stray root-level binary from `go build ./cmd/registryd` (anchored on purpose).
+/registryd
+
+# SQLite runtime files
+*.db
+*.db-shm
+*.db-wal
+/data/
+
+# Editor / OS noise
+.DS_Store
+.idea/
+.vscode/
+*.swp

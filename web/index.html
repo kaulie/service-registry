@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Service Registry · 控制面板</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">◎</span>
+      <h1>Service Registry</h1>
+      <span id="health-badge" class="badge badge--muted">…</span>
+      <span class="badge badge--info" title="本中心只存储元信息：不探活、不心跳、不保证实例可达">元信息存储中心</span>
+    </div>
+    <div class="topbar__meta">
+      <span id="meta-version" class="muted"></span>
+      <span id="meta-revision" class="muted"></span>
+      <span id="meta-uptime" class="muted"></span>
+      <label class="autorefresh">
+        <input type="checkbox" id="autorefresh" checked /> 自动刷新
+      </label>
+      <label class="token">
+        令牌
+        <input type="password" id="token" placeholder="写操作需要（admin / namespace token）" autocomplete="off" />
+      </label>
+    </div>
+  </header>
+
+  <nav class="tabs" id="tabs">
+    <button class="tab tab--active" data-tab="overview">概览</button>
+    <button class="tab" data-tab="services">服务目录</button>
+    <button class="tab" data-tab="apis">API 检索</button>
+    <button class="tab" data-tab="instances">实例</button>
+    <button class="tab" data-tab="changes">变更与审计</button>
+    <button class="tab" data-tab="namespaces">命名空间</button>
+    <button class="tab" data-tab="stream">实时事件流</button>
+  </nav>
+
+  <main class="content">
+    <!-- 概览 -->
+    <section id="tab-overview" class="tabpanel tabpanel--active">
+      <div class="cards" id="overview-cards"></div>
+      <h2>语义边界</h2>
+      <p class="note" id="overview-semantics"></p>
+      <h2>给其他平台拉取（推荐用法）</h2>
+      <pre class="code" id="overview-pull"></pre>
+    </section>
+
+    <!-- 服务目录 -->
+    <section id="tab-services" class="tabpanel">
+      <div class="actions">
+        <input type="search" id="svc-filter" placeholder="过滤：名字 / 描述 / owner / version" />
+        <select id="svc-tag-filter"><option value="">全部标签</option></select>
+        <button class="btn" id="svc-refresh">刷新</button>
+      </div>
+      <div id="svc-list" class="list"></div>
+    </section>
+
+    <!-- API 检索 -->
+    <section id="tab-apis" class="tabpanel">
+      <div class="actions">
+        <select id="api-method">
+          <option value="">任意方法</option>
+          <option>GET</option><option>POST</option><option>PUT</option>
+          <option>PATCH</option><option>DELETE</option><option>HEAD</option><option>OPTIONS</option>
+        </select>
+        <input type="text" id="api-path" placeholder="路径：/v1/streams/abc/events 或 /v1/streams/** 或 /v1/streams/{stream}/events" />
+        <select id="api-match">
+          <option value="">自动（精确→模板→通配）</option>
+          <option value="exact">仅精确</option>
+          <option value="template">仅模板</option>
+          <option value="glob">仅通配</option>
+        </select>
+        <button class="btn btn--primary" id="api-search">检索</button>
+      </div>
+      <div id="api-results" class="list"></div>
+    </section>
+
+    <!-- 实例 -->
+    <section id="tab-instances" class="tabpanel">
+      <div class="actions">
+        <select id="inst-service"><option value="">选择一个服务…</option></select>
+        <button class="btn" id="inst-refresh">刷新</button>
+      </div>
+      <div id="inst-list" class="list"></div>
+    </section>
+
+    <!-- 变更与审计 -->
+    <section id="tab-changes" class="tabpanel">
+      <div class="actions">
+        <input type="search" id="chg-filter" placeholder="过滤：ref / actor / 说明" />
+        <input type="number" id="chg-since" placeholder="since revision（可选）" />
+        <button class="btn" id="chg-refresh">刷新</button>
+      </div>
+      <div id="chg-list" class="list"></div>
+    </section>
+
+    <!-- 命名空间 -->
+    <section id="tab-namespaces" class="tabpanel">
+      <div id="ns-list" class="list"></div>
+      <div class="form-card">
+        <h2>新建命名空间</h2>
+        <div class="form-row">
+          <label>名称（小写字母/数字/._-）<input type="text" id="ns-name" placeholder="default" /></label>
+          <label>描述<input type="text" id="ns-desc" placeholder="可选" /></label>
+          <button class="btn btn--primary" id="ns-create">创建</button>
+        </div>
+        <p class="note">创建后会**一次性**返回注册令牌（只存哈希，之后无法查看；可随时轮换）。</p>
+        <pre class="code" id="ns-token-out" hidden></pre>
+      </div>
+    </section>
+
+    <!-- 实时事件流 -->
+    <section id="tab-stream" class="tabpanel">
+      <div class="actions">
+        <button class="btn" id="stream-toggle">连接 /v1/events</button>
+        <span class="muted" id="stream-status">未连接</span>
+      </div>
+      <pre class="code code--log" id="stream-log"></pre>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>

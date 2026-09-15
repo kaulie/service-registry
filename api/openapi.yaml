@@ -1,0 +1,717 @@
+openapi: 3.0.3
+info:
+  title: service-registry
+  version: 1.0.0
+  description: |
+    全局独立的**服务注册中心**：服务契约（含对外 API 这一基础属性）与实例元信息的
+    唯一存储中心。其他平台**从本中心拉取**服务元信息（快照 / 增量游标 / SSE）。
+
+    **语义边界：本中心只记录"登记了什么"——不探活、不心跳、不启停任何进程，
+    也不保证实例可达。** 可达性由消费方自行校验（契约里的 `healthPath` 只是元信息）。
+
+    鉴权：
+      - 写接口（注册/维护/管理）需要令牌：`Authorization: Bearer <token>` 或 `X-Registry-Token`。
+        `admin token` 全权；`namespace token` 只能写自己那个命名空间。
+      - 读接口默认开放（便于各平台拉取），可用 `REGISTRY_READ_AUTH=token` 收紧。
+      - 未配置 admin token 时是**本机开发模式**：写接口不鉴权。
+    error 响应统一为 `{"error":{"code":"...","message":"..."}}`。
+servers:
+  - url: http://127.0.0.1:4240
+tags:
+  - name: register
+    description: 注册与维护（写）
+  - name: discover
+    description: 发现与查询（读）
+  - name: pull
+    description: 给其他平台拉取（快照 / 增量 / 实时）
+  - name: admin
+    description: 命名空间与令牌管理
+  - name: ops
+    description: 运维
+
+paths:
+  /health:
+    get:
+      tags: [ops]
+      summary: 存活探针（平台约定路径）
+      responses:
+        '200': { description: 进程存活 }
+  /healthz:
+    get:
+      tags: [ops]
+      summary: /health 的别名
+      responses:
+        '200': { description: 同上 }
+  /readyz:
+    get:
+      tags: [ops]
+      summary: 就绪探针（数据库可读写）
+      responses:
+        '200': { description: 就绪 }
+        '503': { description: 数据库不可用 }
+  /metrics:
+    get:
+      tags: [ops]
+      summary: Prometheus 指标（读数抓取时现算）
+      responses:
+        '200':
+          description: 文本格式指标
+          content:
+            text/plain: { schema: { type: string } }
+  /v1/meta:
+    get:
+      tags: [ops]
+      summary: 运行期元信息（版本、计数、当前 revision、语义声明）
+      responses:
+        '200':
+          description: 元信息
+          content:
+            application/json: { schema: { type: object } }
+
+  /v1/snapshot:
+    get:
+      tags: [pull]
+      summary: 全量快照（平台冷启动用）
+      description: |
+        返回全部命名空间、服务契约（含端点索引）与实例，并带上当前 `revision`。
+        响应带 `ETag`（与 revision 绑定），下次请求可带 `If-None-Match`：
+        未变化时返回 `304 Not Modified`，省掉整个响应体。
+      parameters:
+        - { in: query, name: namespace, schema: { type: string }, description: 只取某个命名空间 }
+        - { in: header, name: If-None-Match, schema: { type: string } }
+      responses:
+        '200':
+          description: 全量快照
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Snapshot' } }
+        '304': { description: 与上次相比没有变化 }
+
+  /v1/changes:
+    get:
+      tags: [pull]
+      summary: 按 revision 游标增量拉取（支持 long-poll）
+      description: |
+        每个服务/实例/命名空间的增删改都会产生一条**全局递增 revision** 的变更记录。
+        平台保存最后一次的 `revision`，之后按 `since=<last>` 增量获取即可。
+
+        `wait=30s` 时若暂无变更则挂起等待（long-poll），有新变更立即返回；
+        挂起上限由 `REGISTRY_PULL_WAIT_MAX` 限制，返回值里的 `waited` 表示本次是否挂起过。
+      parameters:
+        - { in: query, name: since, schema: { type: integer, format: int64, default: 0 }, description: 只返回 revision > since }
+        - { in: query, name: limit, schema: { type: integer, default: 100 } }
+        - { in: query, name: namespace, schema: { type: string } }
+        - { in: query, name: wait, schema: { type: string, example: 30s }, description: long-poll 时长（也可传秒数） }
+      responses:
+        '200':
+          description: 变更列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  revision: { type: integer, format: int64, description: 当前全局 revision }
+                  changes: { type: array, items: { $ref: '#/components/schemas/Change' } }
+                  hasMore: { type: boolean }
+                  waited: { type: boolean, description: 是否因 wait 挂起过 }
+
+  /v1/events:
+    get:
+      tags: [pull]
+      summary: 实时变更订阅（SSE）
+      description: |
+        `text/event-stream` 流：
+          - `event: hello`  建立连接时的当前 revision
+          - `event: change` 每一条变更（与 /v1/changes 同构）
+          - `: ping`        保活注释
+        参数 `since` 可指定起始游标；`namespace` / `service` 可过滤。
+      parameters:
+        - { in: query, name: since, schema: { type: integer, format: int64 } }
+        - { in: query, name: namespace, schema: { type: string } }
+        - { in: query, name: service, schema: { type: string } }
+      responses:
+        '200':
+          description: SSE 流
+          content:
+            text/event-stream: { schema: { type: string } }
+
+  /v1/audit:
+    get:
+      tags: [pull]
+      summary: 审计查询（谁在何时改了什么）
+      description: 与 /v1/changes 同一张表，额外支持按实体/引用/操作过滤。
+      parameters:
+        - { in: query, name: since, schema: { type: integer, format: int64 } }
+        - { in: query, name: limit, schema: { type: integer, default: 100 } }
+        - { in: query, name: namespace, schema: { type: string } }
+        - { in: query, name: entity, schema: { type: string, enum: [namespace, service, instance] } }
+        - { in: query, name: ref, schema: { type: string, example: 'default/event-center' } }
+        - { in: query, name: op, schema: { type: string, enum: [create, update, delete] } }
+      responses:
+        '200':
+          description: 审计条目
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  revision: { type: integer, format: int64 }
+                  entries: { type: array, items: { $ref: '#/components/schemas/Change' } }
+                  hasMore: { type: boolean }
+
+  /v1/services:
+    get:
+      tags: [discover]
+      summary: 服务目录（可跨命名空间检索）
+      parameters:
+        - { in: query, name: namespace, schema: { type: string } }
+        - { in: query, name: tag, schema: { type: string } }
+        - { in: query, name: owner, schema: { type: string } }
+        - { in: query, name: protocol, schema: { type: string } }
+        - { in: query, name: q, schema: { type: string }, description: 关键字（名字/描述/owner/version） }
+        - { in: query, name: limit, schema: { type: integer, default: 200, maximum: 2000 } }
+        - { in: query, name: offset, schema: { type: integer, default: 0 } }
+      responses:
+        '200':
+          description: 服务列表（含端点索引与实例数）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  services: { type: array, items: { $ref: '#/components/schemas/Service' } }
+                  total: { type: integer }
+                  limit: { type: integer }
+                  offset: { type: integer }
+
+  /v1/namespaces/{ns}/services:
+    get:
+      tags: [discover]
+      summary: 某命名空间下的服务目录
+      parameters:
+        - $ref: '#/components/parameters/ns'
+        - { in: query, name: tag, schema: { type: string } }
+        - { in: query, name: q, schema: { type: string } }
+      responses:
+        '200': { description: 同 /v1/services }
+
+  /v1/instances/{id}:
+    get:
+      tags: [discover]
+      summary: 按实例 ID 全局查询（不需要知道它属于哪个服务）
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, example: inst_01J8Z9K3M4N5P6Q7R8S9T0V1W2 } }
+      responses:
+        '200':
+          description: 实例
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  instance: { $ref: '#/components/schemas/Instance' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/search/apis:
+    get:
+      tags: [discover]
+      summary: 反向查找——"这个接口谁提供"
+      description: |
+        `path` 支持三种写法：
+          1. 具体路径 `/v1/streams/abc/events` → 命中登记的模板 `/v1/streams/{stream}/events`（matchType=template）
+          2. 登记模板原样 `/v1/streams/{stream}/events` → matchType=exact
+          3. 通配 `/v1/streams/**` → `*` 匹配单段、`**` 跨段（matchType=glob）
+
+        默认按 精确 → 模板 → 通配 依次尝试；`match=` 可强制指定其中一种。
+      parameters:
+        - { in: query, name: method, schema: { type: string, example: GET } }
+        - { in: query, name: path, schema: { type: string } }
+        - { in: query, name: match, schema: { type: string, enum: [exact, template, glob] } }
+        - { in: query, name: namespace, schema: { type: string } }
+        - { in: query, name: tag, schema: { type: string }, description: 端点标签 }
+        - { in: query, name: q, schema: { type: string }, description: 关键字（服务名/描述/摘要/路径） }
+        - { in: query, name: limit, schema: { type: integer, default: 200 } }
+        - { in: query, name: offset, schema: { type: integer, default: 0 } }
+      responses:
+        '200':
+          description: 命中列表（精确/模板命中排在通配之前）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  matches: { type: array, items: { $ref: '#/components/schemas/EndpointMatch' } }
+                  total: { type: integer }
+                  hasMore: { type: boolean }
+                  query: { type: object }
+
+
+  /v1/namespaces:
+    get:
+      tags: [admin]
+      summary: 命名空间列表（含服务/实例计数）
+      responses:
+        '200':
+          description: 列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  namespaces: { type: array, items: { $ref: '#/components/schemas/Namespace' } }
+                  total: { type: integer }
+    post:
+      tags: [admin]
+      summary: 创建命名空间（需要 admin 令牌）
+      description: 返回体中含**一次性**注册令牌（服务端只存哈希，之后无法再次查看）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, example: team-a }
+                description: { type: string }
+      responses:
+        '201':
+          description: 已创建
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  namespace: { $ref: '#/components/schemas/Namespace' }
+                  token: { type: string, description: 只显示这一次 }
+                  note: { type: string }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /v1/namespaces/{ns}:
+    get:
+      tags: [discover]
+      summary: 读取命名空间
+      parameters: [{ $ref: '#/components/parameters/ns' }]
+      responses:
+        '200':
+          description: 命名空间
+          content:
+            application/json:
+              schema: { type: object, properties: { namespace: { $ref: '#/components/schemas/Namespace' } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [admin]
+      summary: 更新命名空间描述（需要 admin 令牌）
+      parameters: [{ $ref: '#/components/parameters/ns' }]
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, properties: { description: { type: string } } }
+      responses:
+        '200': { description: 更新后的命名空间 }
+    delete:
+      tags: [admin]
+      summary: 删除命名空间（连带其全部服务与实例；需要 admin 令牌 + 显式确认）
+      parameters:
+        - $ref: '#/components/parameters/ns'
+        - { in: query, name: confirm, required: true, schema: { type: string }, description: 必须等于命名空间名 }
+      responses:
+        '204': { description: 已删除 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /v1/namespaces/{ns}/token:
+    post:
+      tags: [admin]
+      summary: 轮换命名空间令牌（旧令牌立即失效）
+      parameters: [{ $ref: '#/components/parameters/ns' }]
+      responses:
+        '200':
+          description: 新令牌（只显示这一次）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  namespace: { type: string }
+                  token: { type: string }
+                  note: { type: string }
+    delete:
+      tags: [admin]
+      summary: 清除命名空间令牌（此后仅 admin 令牌可写）
+      parameters: [{ $ref: '#/components/parameters/ns' }]
+      responses:
+        '200': { description: 已清除 }
+
+
+  /v1/namespaces/{ns}/services/{svc}:
+    parameters:
+      - $ref: '#/components/parameters/ns'
+      - $ref: '#/components/parameters/svc'
+    get:
+      tags: [discover]
+      summary: 服务契约详情（含对外 API 端点索引与实例数）
+      responses:
+        '200':
+          description: 契约
+          content:
+            application/json:
+              schema: { type: object, properties: { service: { $ref: '#/components/schemas/Service' } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [register]
+      summary: 登记或更新服务契约（幂等）
+      description: |
+        **服务的对外 API 是本注册中心的基础属性**：请求体必须提供
+        `api.spec`（内联 OpenAPI 3.x / Swagger 2.0 原文，YAML 或 JSON）或
+        `api.endpoints`（显式端点列表），否则 400。
+
+        提供 `api.spec` 时：服务端解析出端点索引、计算 `specHash` 并原样保存原文
+        （可通过 `.../spec` 取回）；`api.endpoints` 优先于从 spec 解析的结果。
+
+        端点索引是**整体替换**：本次没写进去的端点不会残留。
+        实例地址不在这个接口登记，走 `.../instances`。
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/ServiceWrite' } }
+      responses:
+        '201':
+          description: 已创建
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  service: { $ref: '#/components/schemas/Service' }
+                  created: { type: boolean }
+        '200':
+          description: 已更新（幂等重复登记）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  service: { $ref: '#/components/schemas/Service' }
+                  created: { type: boolean }
+        '400': { $ref: '#/components/responses/BadRequest' }
+    delete:
+      tags: [register]
+      summary: 删除服务契约（连带其端点索引与全部实例）
+      responses:
+        '204': { description: 已删除 }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/namespaces/{ns}/services/{svc}/spec:
+    get:
+      tags: [discover]
+      summary: 取回内联 OpenAPI 原文（可直接喂给工具链）
+      parameters:
+        - $ref: '#/components/parameters/ns'
+        - $ref: '#/components/parameters/svc'
+        - { in: query, name: download, schema: { type: boolean }, description: 触发浏览器下载（Content-Disposition） }
+      responses:
+        '200':
+          description: 规范原文
+          content:
+            application/yaml: { schema: { type: string } }
+            application/json: { schema: { type: object } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+
+  /v1/namespaces/{ns}/services/{svc}/instances:
+    parameters:
+      - $ref: '#/components/parameters/ns'
+      - $ref: '#/components/parameters/svc'
+    get:
+      tags: [discover]
+      summary: 实例列表（发现）
+      description: |
+        返回该服务登记的全部实例。本中心**不探活**，所以这里没有"健康/可用"字段——
+        可用性由消费方自行校验（`healthPath` 只是元信息）。
+
+        `pick=random` 直接返回一个随机实例（无状态的便利项）。轮询/权重不提供：
+        在一个被多个消费方共用的注册中心里，共享轮次语义不成立。
+      parameters:
+        - { in: query, name: pick, schema: { type: string, enum: [random] } }
+        - { in: query, name: meta, schema: { type: string, example: 'zone=a' }, description: 按实例元信息过滤（可重复） }
+      responses:
+        '200':
+          description: 实例列表；pick=random 时返回单个实例
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  namespace: { type: string }
+                  service: { type: string }
+                  instances: { type: array, items: { $ref: '#/components/schemas/Instance' } }
+                  total: { type: integer }
+                  instance: { $ref: '#/components/schemas/Instance' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [register]
+      summary: 声明式同步实例集合（推荐给 CI / 部署流水线）
+      description: |
+        传"期望的实例集合"，服务端做 diff：补齐缺失的、更新变化的、**摘除多余的**。
+        幂等：用同一集合重复调用时全部计入 `unchanged`。
+
+        实例身份：优先按 `id` 匹配，其次按 `(scheme,host,port)`。因此"换了地址但没带
+        `id`"会被记作"删旧 + 建新"；想让它算"同一个实例换地址"，请带上原来的 `id`。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                instances: { type: array, items: { $ref: '#/components/schemas/InstanceWrite' } }
+      responses:
+        '200':
+          description: diff 结果
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/SyncResult' } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [register]
+      summary: 登记单个实例
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/InstanceWrite' } }
+      responses:
+        '201':
+          description: 已登记
+          content:
+            application/json:
+              schema: { type: object, properties: { instance: { $ref: '#/components/schemas/Instance' } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /v1/namespaces/{ns}/services/{svc}/instances/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ns'
+      - $ref: '#/components/parameters/svc'
+      - { in: path, name: id, required: true, schema: { type: string } }
+    get:
+      tags: [discover]
+      summary: 读取单个实例
+      responses:
+        '200': { description: 实例 }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [register]
+      summary: 部分更新实例（scheme/host/port/metadata）
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                scheme: { type: string, enum: [http, https, tcp, tls] }
+                host: { type: string }
+                port: { type: integer }
+                metadata: { type: object, additionalProperties: { type: string } }
+      responses:
+        '200':
+          description: 更新后的实例
+          content:
+            application/json:
+              schema: { type: object, properties: { instance: { $ref: '#/components/schemas/Instance' } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      tags: [register]
+      summary: 注销实例
+      responses:
+        '204': { description: 已注销 }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+
+components:
+  parameters:
+    ns:
+      in: path
+      name: ns
+      required: true
+      schema: { type: string, pattern: '^[a-z0-9]([a-z0-9._-]{0,61}[a-z0-9])?$' }
+      description: 命名空间
+    svc:
+      in: path
+      name: svc
+      required: true
+      schema: { type: string, pattern: '^[a-z0-9]([a-z0-9._-]{0,61}[a-z0-9])?$' }
+      description: 服务名
+
+  responses:
+    BadRequest:
+      description: 请求不合法（字段校验失败、API 来源缺失、规格无法解析等）
+      content:
+        application/json: { schema: { $ref: '#/components/schemas/Error' } }
+    NotFound:
+      description: 对象不存在
+      content:
+        application/json: { schema: { $ref: '#/components/schemas/Error' } }
+    Conflict:
+      description: 冲突（同名对象已存在 / 实例地址重复）
+      content:
+        application/json: { schema: { $ref: '#/components/schemas/Error' } }
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string, example: not_found }
+            message: { type: string }
+
+    AuthScheme:
+      type: object
+      description: 服务对外 API 的鉴权方式（元信息，仅用于展示与检索）
+      properties:
+        scheme: { type: string, example: bearer }
+        in: { type: string, enum: [header, query, cookie] }
+        name: { type: string, example: Authorization }
+        notes: { type: string }
+
+    Endpoint:
+      type: object
+      description: 服务对外 API 的一个端点
+      properties:
+        method: { type: string, example: GET }
+        path: { type: string, example: '/v1/streams/{stream}/events' }
+        summary: { type: string }
+        operationId: { type: string }
+        tags: { type: array, items: { type: string } }
+        auth: { type: array, items: { type: string }, description: 引用的 securityScheme 名 }
+
+    ServiceAPI:
+      type: object
+      description: 服务的对外 API 描述（spec 原文不在这里返回，走 .../spec）
+      properties:
+        protocols: { type: array, items: { type: string }, example: [http] }
+        authSchemes: { type: array, items: { $ref: '#/components/schemas/AuthScheme' } }
+        docsUrl: { type: string }
+        specUrl: { type: string, description: 外部规范链接（只存不抓取） }
+        specHash: { type: string, description: 内联规范原文的 sha256 }
+        specBytes: { type: integer }
+        hasSpec: { type: boolean }
+        endpoints: { type: array, items: { $ref: '#/components/schemas/Endpoint' } }
+
+    Service:
+      type: object
+      description: 服务契约（低频变更）
+      properties:
+        namespace: { type: string }
+        name: { type: string }
+        version: { type: string }
+        owner: { type: string }
+        description: { type: string }
+        tags: { type: array, items: { type: string } }
+        basePath: { type: string }
+        healthPath: { type: string, description: 元信息：消费方/看门狗可据此自行探活 }
+        api: { $ref: '#/components/schemas/ServiceAPI' }
+        revision: { type: integer, format: int64, description: 最后一次被改时的全局 revision }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        registeredBy: { type: string, description: 谁登记/改的（审计） }
+        instanceCount: { type: integer }
+
+    ServiceWrite:
+      type: object
+      description: 登记契约的请求体（与 Service 同构，可"GET → 改 → PUT"闭环）
+      properties:
+        version: { type: string }
+        owner: { type: string }
+        description: { type: string }
+        tags: { type: array, items: { type: string } }
+        basePath: { type: string }
+        healthPath: { type: string, description: 必须以 / 开头 }
+        api:
+          allOf:
+            - $ref: '#/components/schemas/ServiceAPI'
+            - type: object
+              properties:
+                spec: { type: string, description: 内联 OpenAPI 3.x / Swagger 2.0 原文（YAML 或 JSON，仅写入用） }
+                specFormat: { type: string, enum: [yaml, json], description: 省略时按内容自动判定 }
+
+
+    Instance:
+      type: object
+      description: 实例元信息（没有任何运行时状态位：不探活、不心跳）
+      properties:
+        id: { type: string, example: inst_01J8Z9K3M4N5P6Q7R8S9T0V1W2 }
+        namespace: { type: string }
+        service: { type: string }
+        scheme: { type: string, enum: [http, https, tcp, tls] }
+        host: { type: string }
+        port: { type: integer }
+        metadata: { type: object, additionalProperties: { type: string } }
+        revision: { type: integer, format: int64 }
+        registeredAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        registeredBy: { type: string }
+
+    InstanceWrite:
+      type: object
+      properties:
+        id: { type: string, description: 省略则服务端生成；同步时可用来锚定"同一个实例" }
+        scheme: { type: string, enum: [http, https, tcp, tls], default: http }
+        host: { type: string, description: 主机名或 IP（不带协议/路径） }
+        port: { type: integer, minimum: 1, maximum: 65535 }
+        metadata: { type: object, additionalProperties: { type: string } }
+
+    SyncResult:
+      type: object
+      properties:
+        instances: { type: array, items: { $ref: '#/components/schemas/Instance' }, description: 对齐后的实例集合 }
+        created: { type: integer }
+        updated: { type: integer }
+        deleted: { type: integer }
+        unchanged: { type: integer }
+
+    EndpointMatch:
+      type: object
+      description: 一次"这个接口谁提供"的命中
+      properties:
+        namespace: { type: string }
+        service: { type: string }
+        serviceVersion: { type: string }
+        description: { type: string }
+        instanceCount: { type: integer }
+        matchType: { type: string, enum: [exact, template, glob] }
+        endpoint: { $ref: '#/components/schemas/Endpoint' }
+
+    Namespace:
+      type: object
+      properties:
+        name: { type: string }
+        description: { type: string }
+        tokenSet: { type: boolean, description: 是否配置了注册令牌（令牌本身永不可见） }
+        serviceCount: { type: integer }
+        instanceCount: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    Change:
+      type: object
+      description: 一条全局递增的变更记录（既是增量拉取游标，也是审计日志）
+      properties:
+        revision: { type: integer, format: int64 }
+        at: { type: string, format: date-time }
+        namespace: { type: string }
+        entity: { type: string, enum: [namespace, service, instance] }
+        ref: { type: string, example: default/event-center/inst_01J8Z9K3M4N5P6Q7R8S9T0V1W2 }
+        op: { type: string, enum: [create, update, delete] }
+        actor: { type: string, description: 'admin / ns:<name> / anonymous' }
+        detail: { type: string, description: 人类可读的变更说明 }
+
+    Snapshot:
+      type: object
+      properties:
+        revision: { type: integer, format: int64 }
+        generatedAt: { type: string, format: date-time }
+        namespaces: { type: array, items: { $ref: '#/components/schemas/Namespace' } }
+        services: { type: array, items: { $ref: '#/components/schemas/Service' } }
+        instances: { type: array, items: { $ref: '#/components/schemas/Instance' } }
+
