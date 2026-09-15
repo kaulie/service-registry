@@ -11,9 +11,9 @@ LDFLAGS   := -X main.version=$(VERSION)
 # 缓存落到那里会被下一次 rsync --delete 波及。
 BUILD_CACHE ?= $(TMPDIR)/service-registry-build-cache
 
-.PHONY: all build test race lint fmt fmt-check vet run clean docker panel-check help
+.PHONY: all build test race lint fmt fmt-check vet run clean docker panel-check panel-smoke help
 
-all: lint test build
+all: lint test panel-smoke build
 
 build: ## 构建本机二进制到 bin/
 	@mkdir -p bin
@@ -44,6 +44,10 @@ run: ## 本机运行（数据落在 ./data/registry.db，监听 127.0.0.1:4240�
 
 panel-check: ## 检查面板资源是否可被 go:embed 编入（防止漏文件）
 	go build ./web/
+
+panel-smoke: ## 面板交互冒烟：在受控 DOM 里模拟“填表→点提交”，断言失败不静默（需 node）
+	@if command -v node >/dev/null 2>&1; then node web/panel-smoke.mjs; \
+	else echo "skip: 未安装 node，跳过面板冒烟"; fi
 
 clean:
 	rm -rf bin outputs data

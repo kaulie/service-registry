@@ -563,6 +563,76 @@ function setApiMode(mode) {
   show($('#svc-form-manual-wrap'), mode === 'manual');
 }
 
+// ---- 表单反馈：绝不静默 ----
+// 教训：本地校验失败时只写一个 12px 灰字，看起来就是"点了没反应、也不提示哪里错"。
+// 现在统一走 formFail：红色常驻提示 + toast（表单不在视口也能看到）+ 标出出错字段。
+function setHint(node, msg, kind) {
+  node.textContent = msg || '';
+  node.className = 'hint' + (kind ? ' hint--' + kind : '');
+}
+function clearFieldErrors(scope) {
+  scope.querySelectorAll('.field-error').forEach((el) => el.classList.remove('field-error'));
+}
+function markField(el) {
+  if (!el) return;
+  el.classList.add('field-error');
+  if (el.focus) el.focus();
+  if (el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+}
+function formFail(hintNode, msg, fieldEl) {
+  setHint(hintNode, '⚠ ' + msg, 'error');
+  toast(msg, true);
+  markField(fieldEl);
+}
+function formOK(hintNode, msg) {
+  setHint(hintNode, '✓ ' + msg, 'ok');
+}
+// 提交期间禁用按钮并改文案：避免连点，也避免"点了没反应"的错觉。
+async function withBusy(btn, busyText, fn) {
+  const old = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = busyText;
+  try {
+    return await fn();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = old;
+  }
+}
+// 任何未捕获的脚本异常都变成可见提示（否则用户只会看到"没反应"）。
+window.addEventListener('error', (e) => {
+  toast('面板脚本出错：' + ((e && (e.message || e.error)) || 'unknown'), true);
+});
+window.addEventListener('unhandledrejection', (e) => {
+  const r = e && e.reason;
+  toast('面板请求出错：' + ((r && r.message) || r), true);
+});
+
+// 最小可用的 OpenAPI 模板：让"不粘贴 spec 直接提交"也能成功，而不是卡在校验上。
+function specTemplate(name) {
+  return [
+    'openapi: 3.0.3',
+    'info:',
+    '  title: ' + (name || 'my-service'),
+    '  version: 0.1.0',
+    'description: 面板生成的最小模板 —— 把 paths 换成真实接口，或整段替换为你们仓库里的 openapi.yaml',
+    'paths:',
+    '  /health:',
+    '    get:',
+    '      summary: 健康检查',
+    '',
+  ].join('\n');
+}
+let lastSpecTemplate = '';
+function prefillSpecTemplate(force) {
+  const spec = $('#svc-form-spec');
+  const tpl = specTemplate($('#svc-form-name').value.trim());
+  if (force || !spec.value.trim() || spec.value === lastSpecTemplate) {
+    spec.value = tpl;
+  }
+  lastSpecTemplate = tpl;
+}
+
 // openServiceForm(null) = 登记新服务；传服务对象 = 编辑（服务名不可改：它是身份）。
 async function openServiceForm(svc) {
   await fillNamespaceSelect(svc ? svc.namespace : undefined);
@@ -599,18 +669,38 @@ async function openServiceForm(svc) {
     ['name', 'version', 'owner', 'health', 'desc', 'tags', 'docs', 'specurl', 'spec'].forEach((k) => { f[k].value = ''; });
     setEpRows(null);
     setApiMode('spec');
+    prefillSpecTemplate(true); // 预填最小模板：不粘贴 spec 也能直接提交成功
   }
-  $('#svc-form-hint').textContent = '';
+  setHint($('#svc-form-hint'), '');
   show($('#svc-form-card'), true);
   show($('#inst-form-card'), false);
   show($('#inst-batch-card'), false);
 }
 
 async function submitServiceForm() {
-  const ns = $('#svc-form-ns').value;
-  const name = $('#svc-form-name').value.trim();
+  const card = $('#svc-form-card');
   const hint = $('#svc-form-hint');
-  if (!ns || !name) { hint.textContent = '命名空间与服务名必填'; return; }
+  clearFieldErrors(card);
+
+  const nsEl = $('#svc-form-ns');
+  const nameEl = $('#svc-form-name');
+  const specEl = $('#svc-form-spec');
+  const ns = nsEl.value;
+  const name = nameEl.value.trim();
+
+  // 校验失败一律 formFail：红色常驻提示 + toast + 标红并聚焦出错字段。
+  if (!ns) {
+    formFail(hint, '请选择命名空间（下拉为空说明还没有命名空间，先去「命名空间」页签新建一个）', nsEl);
+    return;
+  }
+  if (!name) {
+    formFail(hint, '服务名必填（小写字母/数字/._-，例如 event-center）', nameEl);
+    return;
+  }
+  if (!/^[a-z0-9]([a-z0-9._-]{0,61}[a-z0-9])?$/.test(name)) {
+    formFail(hint, '服务名不合法：只能用小写字母/数字/._-，且以字母或数字开头结尾（≤63 字符）', nameEl);
+    return;
+  }
 
   const apiPart = { protocols: ['http'] };
   const docs = $('#svc-form-docs').value.trim();
@@ -619,37 +709,66 @@ async function submitServiceForm() {
   if (specurl) apiPart.specUrl = specurl;
 
   if ($('#svc-form-mode').value === 'spec') {
-    const spec = $('#svc-form-spec').value;
-    if (!spec.trim()) { hint.textContent = '请粘贴 OpenAPI 原文，或切到「手工声明端点」'; return; }
+    const spec = specEl.value;
+    if (!spec.trim()) {
+      formFail(hint, 'API 原文为空：粘贴 OpenAPI（YAML/JSON），或点「预填最小模板」，或切到「手工声明端点」', specEl);
+      return;
+    }
     apiPart.spec = spec;
   } else {
-    const eps = [...document.querySelectorAll('#svc-form-eps tbody tr')].map((tr) => ({
-      method: tr.querySelector('.ep-method').value,
-      path: tr.querySelector('.ep-path').value.trim(),
-      summary: tr.querySelector('.ep-summary').value.trim(),
-    })).filter((e) => e.path);
-    if (!eps.length) { hint.textContent = '至少声明一个端点'; return; }
+    const eps = [];
+    for (const tr of [...document.querySelectorAll('#svc-form-eps tbody tr')]) {
+      const pathEl = tr.querySelector('.ep-path');
+      const path = pathEl.value.trim();
+      if (!path) continue; // 空行忽略
+      if (!path.startsWith('/')) {
+        formFail(hint, '端点路径必须以 / 开头，当前是：' + path, pathEl);
+        return;
+      }
+      eps.push({
+        method: tr.querySelector('.ep-method').value,
+        path,
+        summary: tr.querySelector('.ep-summary').value.trim(),
+      });
+    }
+    if (!eps.length) {
+      formFail(hint, '至少声明一个端点：点「＋ 加一行」，填上 method 与 path（如 GET /health）');
+      return;
+    }
     apiPart.endpoints = eps;
+  }
+
+  const healthEl = $('#svc-form-health');
+  const health = healthEl.value.trim();
+  if (health && !health.startsWith('/')) {
+    formFail(hint, 'healthPath 必须以 / 开头（它是元信息，供消费方/看门狗自行探活）：' + health, healthEl);
+    return;
   }
 
   const body = {
     version: $('#svc-form-version').value.trim(),
     owner: $('#svc-form-owner').value.trim(),
     description: $('#svc-form-desc').value.trim(),
-    healthPath: $('#svc-form-health').value.trim(),
+    healthPath: health,
     api: apiPart,
   };
   const tags = parseList($('#svc-form-tags').value);
   if (tags.length) body.tags = tags;
 
-  hint.textContent = '提交中…';
-  const res = await api(
-    `/v1/namespaces/${encodeURIComponent(ns)}/services/${encodeURIComponent(name)}`,
-    { method: 'PUT', body });
-  if (!res.ok) { hint.textContent = ''; toast('登记失败：' + errText(res.data), true); return; }
-  toast(`已${res.data.created ? '登记' : '更新'} ${ns}/${name}（${(res.data.service.api.endpoints || []).length} 个端点）`);
-  show($('#svc-form-card'), false);
-  renderServices();
+  await withBusy($('#svc-form-submit'), '提交中…', async () => {
+    const res = await api(
+      `/v1/namespaces/${encodeURIComponent(ns)}/services/${encodeURIComponent(name)}`,
+      { method: 'PUT', body });
+    if (!res.ok) {
+      formFail(hint, '登记失败：' + errText(res.data));
+      return;
+    }
+    const endpoints = (res.data.service.api.endpoints || []).length;
+    setHint(hint, '');
+    toast(`已${res.data.created ? '登记' : '更新'} ${ns}/${name}（${endpoints} 个端点）`);
+    show(card, false);
+    renderServices();
+  });
 }
 
 // ---- 面板写入口：新增实例 / 声明式批量同步 ----
@@ -668,29 +787,40 @@ function openInstanceForm() {
   $('#inst-form-title').textContent = `新增实例 → ${target.ns}/${target.svc}`;
   $('#inst-form-scheme').value = 'http';
   ['host', 'port', 'meta'].forEach((k) => { $('#inst-form-' + k).value = ''; });
-  $('#inst-form-hint').textContent = '';
+  setHint($('#inst-form-hint'), '');
   show($('#inst-form-card'), true);
 }
 
 async function submitInstanceForm() {
   const target = currentService();
   if (!target) return;
+  const card = $('#inst-form-card');
   const hint = $('#inst-form-hint');
-  const host = $('#inst-form-host').value.trim();
-  const port = Number($('#inst-form-port').value);
-  if (!host) { hint.textContent = 'host 必填'; return; }
-  if (!port) { hint.textContent = 'port 必填（1-65535）'; return; }
+  clearFieldErrors(card);
+
+  const hostEl = $('#inst-form-host');
+  const portEl = $('#inst-form-port');
+  const host = hostEl.value.trim();
+  const port = Number(portEl.value);
+  if (!host) { formFail(hint, 'host 必填（主机名或 IP，不要带 http:// 与路径）', hostEl); return; }
+  if (/[:/]/.test(host.replace(/^\[.*\]$/, ''))) {
+    formFail(hint, 'host 只能是主机名或 IP，不要带协议与路径：' + host, hostEl);
+    return;
+  }
+  if (!port || port < 1 || port > 65535) { formFail(hint, 'port 必须在 1-65535 之间', portEl); return; }
 
   const body = { scheme: $('#inst-form-scheme').value, host, port };
   const meta = parseKV($('#inst-form-meta').value);
   if (Object.keys(meta).length) body.metadata = meta;
 
-  hint.textContent = '提交中…';
-  const res = await api(`${target.base}/instances`, { method: 'POST', body });
-  if (!res.ok) { hint.textContent = ''; toast('新增失败：' + errText(res.data), true); return; }
-  toast(`已登记实例 ${body.scheme}://${host}:${port}`);
-  show($('#inst-form-card'), false);
-  renderInstances();
+  await withBusy($('#inst-form-submit'), '提交中…', async () => {
+    const res = await api(`${target.base}/instances`, { method: 'POST', body });
+    if (!res.ok) { formFail(hint, '新增实例失败：' + errText(res.data)); return; }
+    setHint(hint, '');
+    toast(`已登记实例 ${body.scheme}://${host}:${port}`);
+    show(card, false);
+    renderInstances();
+  });
 }
 
 function openBatchForm() {
@@ -698,36 +828,44 @@ function openBatchForm() {
   if (!target) return;
   show($('#svc-form-card'), false);
   show($('#inst-form-card'), false);
-  $('#inst-batch-hint').textContent = '';
+  setHint($('#inst-batch-hint'), '');
   show($('#inst-batch-card'), true);
 }
 
 async function submitBatchForm() {
   const target = currentService();
   if (!target) return;
+  const card = $('#inst-batch-card');
   const hint = $('#inst-batch-hint');
-  const raw = $('#inst-batch-json').value.trim();
-  if (!raw) { hint.textContent = '请贴实例数组，例如 [{"scheme":"http","host":"10.0.0.7","port":9099}]'; return; }
+  clearFieldErrors(card);
+  const jsonEl = $('#inst-batch-json');
+  const raw = jsonEl.value.trim();
+  if (!raw) {
+    formFail(hint, '请贴实例数组，例如 [{"scheme":"http","host":"10.0.0.7","port":9099}]', jsonEl);
+    return;
+  }
   let parsed;
   try {
     parsed = JSON.parse(raw);
   } catch (e) {
-    hint.textContent = 'JSON 解析失败：' + e.message;
+    formFail(hint, 'JSON 解析失败：' + e.message, jsonEl);
     return;
   }
   const items = Array.isArray(parsed) ? parsed : (parsed && parsed.instances);
   if (!Array.isArray(items)) {
-    hint.textContent = '需要数组：直接贴 [ {...} ]，或用 {"instances":[...]} 包一层';
+    formFail(hint, '需要数组：直接贴 [ {...} ]，或用 {"instances":[...]} 包一层', jsonEl);
     return;
   }
 
-  hint.textContent = '同步中…';
-  const res = await api(`${target.base}/instances`, { method: 'PUT', body: { instances: items } });
-  if (!res.ok) { hint.textContent = ''; toast('同步失败：' + errText(res.data), true); return; }
-  const d = res.data;
-  toast(`同步完成：新增 ${d.created}、更新 ${d.updated}、摘除 ${d.deleted}、未变 ${d.unchanged}`);
-  show($('#inst-batch-card'), false);
-  renderInstances();
+  await withBusy($('#inst-batch-submit'), '同步中…', async () => {
+    const res = await api(`${target.base}/instances`, { method: 'PUT', body: { instances: items } });
+    if (!res.ok) { formFail(hint, '同步失败：' + errText(res.data)); return; }
+    const d = res.data;
+    setHint(hint, '');
+    toast(`同步完成：新增 ${d.created}、更新 ${d.updated}、摘除 ${d.deleted}、未变 ${d.unchanged}`);
+    show(card, false);
+    renderInstances();
+  });
 }
 
 $('#svc-refresh').addEventListener('click', renderServices);
@@ -742,6 +880,8 @@ $('#svc-form-cancel').addEventListener('click', () => show($('#svc-form-card'), 
 $('#svc-form-submit').addEventListener('click', submitServiceForm);
 $('#svc-form-ep-add').addEventListener('click', () => $('#svc-form-eps tbody').appendChild(epRow(null)));
 $('#svc-form-mode').addEventListener('change', (e) => setApiMode(e.target.value));
+$('#svc-form-spec-template').addEventListener('click', () => prefillSpecTemplate(true));
+$('#svc-form-name').addEventListener('input', () => prefillSpecTemplate(false));
 $('#inst-new').addEventListener('click', openInstanceForm);
 $('#inst-form-cancel').addEventListener('click', () => show($('#inst-form-card'), false));
 $('#inst-form-submit').addEventListener('click', submitInstanceForm);

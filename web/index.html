@@ -87,7 +87,10 @@
             <textarea id="svc-form-spec" rows="10" spellcheck="false"
               placeholder="openapi: 3.0.3&#10;info:&#10;  title: event-center&#10;  version: 0.1.0&#10;paths:&#10;  /health:&#10;    get:&#10;      summary: 健康检查"></textarea>
           </label>
-          <p class="note">服务端会解析出端点索引并存 sha256；原文随时可从「下载 OpenAPI」取回。</p>
+          <div class="actions" style="margin:6px 0">
+            <button class="btn btn--small" id="svc-form-spec-template" type="button">预填最小模板</button>
+            <span class="note">服务端会解析出端点索引并存 sha256；原文随时可从「下载 OpenAPI」取回。</span>
+          </div>
         </div>
 
         <div id="svc-form-manual-wrap" hidden>
@@ -99,9 +102,9 @@
         </div>
 
         <div class="actions" style="margin-top:12px">
-          <button class="btn btn--primary" id="svc-form-submit">提交</button>
-          <button class="btn" id="svc-form-cancel">取消</button>
-          <span class="muted" id="svc-form-hint"></span>
+          <button class="btn btn--primary" id="svc-form-submit" type="button">提交</button>
+          <button class="btn" id="svc-form-cancel" type="button">取消</button>
+          <span class="hint" id="svc-form-hint"></span>
         </div>
       </div>
 
@@ -151,9 +154,9 @@
         </div>
         <p class="note">只登记元信息：本中心不会去访问这个地址，可达性由调用方自行校验。</p>
         <div class="actions" style="margin-top:8px">
-          <button class="btn btn--primary" id="inst-form-submit">提交</button>
-          <button class="btn" id="inst-form-cancel">取消</button>
-          <span class="muted" id="inst-form-hint"></span>
+          <button class="btn btn--primary" id="inst-form-submit" type="button">提交</button>
+          <button class="btn" id="inst-form-cancel" type="button">取消</button>
+          <span class="hint" id="inst-form-hint"></span>
         </div>
       </div>
 
@@ -165,9 +168,9 @@
             placeholder='[&#10;  {"scheme":"http","host":"10.0.0.7","port":9099,"metadata":{"zone":"edge"}}&#10;]'></textarea>
         </label>
         <div class="actions" style="margin-top:8px">
-          <button class="btn btn--primary" id="inst-batch-submit">同步</button>
-          <button class="btn" id="inst-batch-cancel">取消</button>
-          <span class="muted" id="inst-batch-hint"></span>
+          <button class="btn btn--primary" id="inst-batch-submit" type="button">同步</button>
+          <button class="btn" id="inst-batch-cancel" type="button">取消</button>
+          <span class="hint" id="inst-batch-hint"></span>
         </div>
       </div>
 
