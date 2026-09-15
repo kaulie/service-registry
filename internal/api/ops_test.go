@@ -58,19 +58,33 @@ func TestOpsEndpointsAndPanel(t *testing.T) {
 		t.Fatalf("面板 HTML 异常：%s", trunc(html, 200))
 	}
 	// 面板必须能用图形界面**登记服务**与**新增实例**（曾漏掉，回归护栏）。
-	for _, want := range []string{"＋ 登记服务契约", "＋ 新增实例", "声明式批量同步", "openapi: 3.0.3"} {
+	for _, want := range []string{
+		"＋ 登记服务契约", "＋ 新增实例", "声明式批量同步", "openapi: 3.0.3",
+		"预填最小模板", // 不粘贴 spec 也能提交成功
+		`id="svc-form-submit" type="button"`,
+	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("面板 HTML 缺少新增服务/实例的入口：%q", want)
 		}
 	}
 	js := e.getRaw(t, "/panel/app.js")
-	for _, want := range []string{"/v1/snapshot", "submitServiceForm", "svc-form-submit", "inst-batch-submit", "openServiceForm"} {
+	for _, want := range []string{
+		"/v1/snapshot", "submitServiceForm", "svc-form-submit", "inst-batch-submit", "openServiceForm",
+		// 反馈永不静默：校验失败要 toast + 标红字段，并有全局异常兜底
+		"unhandledrejection", "field-error", "formFail", "prefillSpecTemplate", "hint--",
+	} {
 		if !strings.Contains(js, want) {
 			t.Errorf("面板 JS 缺少 %q", want)
 		}
 	}
-	if css := e.getRaw(t, "/panel/styles.css"); len(css) < 100 {
-		t.Errorf("面板 CSS 异常：%d 字节", len(css))
+	css := e.getRaw(t, "/panel/styles.css")
+	for _, want := range []string{".hint--error", "input.field-error", "button[disabled]"} {
+		if !strings.Contains(css, want) {
+			t.Errorf("面板 CSS 缺少醒目的错误样式 %q", want)
+		}
+	}
+	if !strings.Contains(css, ".hint--ok") {
+		t.Errorf("面板 CSS 缺少成功样式 .hint--ok")
 	}
 }
 
