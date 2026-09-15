@@ -22,35 +22,41 @@ type role struct {
 }
 
 // authorize 校验请求权限。needWrite=true 表示写接口。
+//
+// 顺序（每一层都有明确语义）：
+//  1. 带的令牌合法 → 按 admin / namespace 记账（审计里能看出是谁改的）；
+//  2. 带了令牌但**非法** → 403（不静默忽略一个错误的令牌）；
+//  3. 写接口且写权限开放（REGISTRY_WRITE_AUTH=open，默认）→ 放行，actor=anonymous；
+//  4. 读接口且未要求鉴权 → 放行，actor=reader；
+//  5. 其余：没令牌 401、令牌不够权 403。
 func (s *Server) authorize(r *http.Request, namespace string, needWrite bool) (role, int, string) {
 	token := bearerToken(r)
 
-	// 未配置 admin 令牌 = 本机开发模式：写接口不鉴权（actor=anonymous）。
-	if s.cfg.AdminToken == "" {
+	if token != "" {
+		// admin 令牌：全权。
+		if s.cfg.AdminToken != "" && constantEqual(token, s.cfg.AdminToken) {
+			return role{admin: true, actor: "admin"}, 0, ""
+		}
+		// 命名空间令牌：只能操作自己那个命名空间。
+		if namespace != "" {
+			ns, tokenHash, err := s.store.GetNamespace(r.Context(), namespace)
+			if err == nil && tokenHash != "" && constantEqual(hashToken(token), tokenHash) {
+				return role{namespace: ns.Name, actor: "ns:" + ns.Name}, 0, ""
+			}
+		}
+		return role{}, http.StatusForbidden, "令牌无效，或无权操作该命名空间"
+	}
+
+	if needWrite && s.cfg.WriteAuthOpen {
+		// 写权限开放：连管理接口（建命名空间、轮换令牌）也放行，
+		// 但 actor 记为 anonymous，审计里能看出"这是没带令牌的写入"。
 		return role{admin: true, actor: "anonymous"}, 0, ""
 	}
-
-	// admin 令牌：全权。
-	if token != "" && constantEqual(token, s.cfg.AdminToken) {
-		return role{admin: true, actor: "admin"}, 0, ""
-	}
-
-	// 命名空间令牌：只能操作自己那个命名空间。
-	if namespace != "" && token != "" {
-		ns, tokenHash, err := s.store.GetNamespace(r.Context(), namespace)
-		if err == nil && tokenHash != "" && constantEqual(hashToken(token), tokenHash) {
-			return role{namespace: ns.Name, actor: "ns:" + ns.Name}, 0, ""
-		}
-	}
-
 	if !needWrite && !s.cfg.ReadAuthRequired {
 		return role{actor: "reader"}, 0, ""
 	}
-	if token == "" {
-		return role{}, http.StatusUnauthorized,
-			"缺少令牌：请提供 Authorization: Bearer <token> 或 X-Registry-Token"
-	}
-	return role{}, http.StatusForbidden, "令牌无效，或无权操作该命名空间"
+	return role{}, http.StatusUnauthorized,
+		"缺少令牌：请提供 Authorization: Bearer <token> 或 X-Registry-Token"
 }
 
 // requireWrite 是写接口的统一入口：通过返回 role，否则已写响应体。

@@ -103,6 +103,17 @@ async function renderOverview() {
   }
   if (!meta.ok) { toast('读取 /v1/meta 失败：' + JSON.stringify(meta.data), true); return; }
   const m = meta.data;
+  const wa = $('#write-auth-badge');
+  if (m.writeAuth === 'open') {
+    wa.textContent = '写接口开放（无需令牌）';
+    wa.className = 'badge badge--warn';
+    wa.title = 'REGISTRY_WRITE_AUTH=open：任何人都能登记/修改/删除元信息。'
+      + '收紧方式：backend/.env 里改成 token 后重启。';
+  } else {
+    wa.textContent = '写接口需令牌';
+    wa.className = 'badge badge--ok';
+    wa.title = 'REGISTRY_WRITE_AUTH=token：写操作需要 admin 令牌或命名空间令牌。';
+  }
   $('#meta-version').textContent = 'v' + m.version;
   $('#meta-revision').textContent = 'revision ' + m.revision;
   $('#meta-uptime').textContent = 'uptime ' + m.uptimeSeconds + 's';

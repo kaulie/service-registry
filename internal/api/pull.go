@@ -126,6 +126,10 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 		s.mapStoreError(w, r, err, "当前 revision")
 		return
 	}
+	writeAuth := "token"
+	if s.cfg.WriteAuthOpen {
+		writeAuth = "open"
+	}
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"service":          "service-registry",
 		"version":          s.version,
@@ -133,6 +137,7 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 		"uptimeSeconds":    int(time.Since(s.startedAt).Seconds()),
 		"revision":         rev,
 		"counts":           counts,
+		"writeAuth":        writeAuth,
 		"readAuthRequired": s.cfg.ReadAuthRequired,
 		"defaultNamespace": s.cfg.DefaultNamespace,
 		"semantics": "本中心是**元信息存储中心**：只记录登记了什么，" +

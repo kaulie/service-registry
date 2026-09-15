@@ -59,6 +59,15 @@ func main() {
 	declareMetrics(m)
 	srv := api.NewServer(st, cfg, m, log, version)
 
+	if cfg.WriteAuthOpen {
+		// 刻意默认、但必须显眼：开放的写接口意味着任何人都能往唯一的元信息真源里写数据。
+		log.Warn("写接口未鉴权（REGISTRY_WRITE_AUTH=open）：任何人只要连得上就能登记/修改/删除服务元信息；" +
+			"需要收紧时设 REGISTRY_WRITE_AUTH=token 并重启")
+	}
+	if cfg.ReadAuthRequired {
+		log.Info("读接口要求令牌（REGISTRY_READ_AUTH=token）：各平台拉取时需带令牌")
+	}
+
 	httpSrv := &http.Server{
 		Addr:              cfg.Addr(),
 		Handler:           srv.Handler(),

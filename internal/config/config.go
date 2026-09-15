@@ -17,6 +17,15 @@ type Config struct {
 	DBPath string
 	// AdminToken 管理令牌；为空则管理接口不鉴权（仅开发/本机）。
 	AdminToken string
+	// WriteAuthOpen 为真时**写接口默认开放**：不带令牌也能登记/维护/管理。
+	//
+	// 这是刻意的默认值（本机/内网先把链路跑通），代价是任何人都能往唯一的
+	// 元信息真源里写数据 —— 所以启动时会有 WARN，/v1/meta 会暴露 writeAuth，
+	// 面板也会显示徽标。生产请设 REGISTRY_WRITE_AUTH=token。
+	//
+	// 开放不等于完全不认令牌：若请求带了合法令牌，仍然按 admin / namespace 记账
+	// （审计里能看出是谁改的）；带了**非法**令牌则一律 403（不静默忽略）。
+	WriteAuthOpen bool
 	// ReadAuthRequired 为真时读接口也要求令牌（默认为假：便于各平台拉取）。
 	ReadAuthRequired bool
 	// DefaultNamespace 启动时自动播种的命名空间（空则不播种）。
@@ -66,6 +75,16 @@ func Load() (Config, error) {
 		c.ReadAuthRequired = true
 	default:
 		return c, fmt.Errorf("REGISTRY_READ_AUTH 只能是 open 或 token")
+	}
+
+	// 写接口默认开放（本机/内网先跑通链路）；生产设 REGISTRY_WRITE_AUTH=token。
+	switch strings.ToLower(env("REGISTRY_WRITE_AUTH", "open")) {
+	case "open", "", "none":
+		c.WriteAuthOpen = true
+	case "token", "required":
+		c.WriteAuthOpen = false
+	default:
+		return c, fmt.Errorf("REGISTRY_WRITE_AUTH 只能是 open 或 token")
 	}
 
 	var err error
