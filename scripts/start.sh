@@ -68,6 +68,13 @@ REGISTRY_READ_AUTH=open
 # REGISTRY_CHANGE_RETENTION_DAYS=0
 # 单个服务内联 OpenAPI 原文大小上限（字节）
 # REGISTRY_MAX_SPEC_BYTES=262144
+# 部门属性的权威数据源：组织架构服务（organization）的部门目录从这里同步。
+# 默认 http://127.0.0.1:4244（本机组织服务）；指到别处填完整地址，不用这个能力填 off。
+# 无论是否可达都不影响本中心的读写：不可达时部门按声明值保存。
+# REGISTRY_ORG_URL=http://127.0.0.1:4244
+# 组织接口的单次超时与目录缓存时长
+# REGISTRY_ORG_TIMEOUT=3s
+# REGISTRY_ORG_CACHE_TTL=30s
 EOF
   chmod 600 "${ENV_FILE}"
   log "已生成 ${ENV_FILE}（含新的 REGISTRY_ADMIN_TOKEN）"
@@ -96,7 +103,12 @@ if [ -f "${PID_FILE}" ]; then
   rm -f "${PID_FILE}"
 fi
 
-log "启动 部署版本=${APP_VERSION} 监听=${REGISTRY_HTTP_ADDR} 库=${REGISTRY_DB_PATH}"
+# 部门属性的权威数据源（组织架构服务）。默认与代码里的默认一致：本机 organization 的 4244。
+# 显式导出只是为了日志里能看清"部门的部门数据是从哪取的"。
+: "${REGISTRY_ORG_URL:=http://127.0.0.1:4244}"
+export REGISTRY_ORG_URL
+
+log "启动 部署版本=${APP_VERSION} 监听=${REGISTRY_HTTP_ADDR} 库=${REGISTRY_DB_PATH} 部门源=${REGISTRY_ORG_URL}"
 nohup "${BIN}" >> "${LOG_FILE}" 2>&1 &
 echo $! > "${PID_FILE}"
 pid="$(cat "${PID_FILE}")"

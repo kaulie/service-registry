@@ -36,11 +36,13 @@ func (s *Store) UpsertService(ctx context.Context, in ServiceInput, actor string
 
 		if created {
 			if _, err := tx.ExecContext(ctx, `
-				INSERT INTO services (namespace, name, version, owner, description, git_repo_url, tags, protocols,
+				INSERT INTO services (namespace, name, version, owner, description, git_repo_url,
+				                      department_id, department_name, tags, protocols,
 				                      base_path, health_path, auth_schemes, docs_url, spec_url,
 				                      spec, spec_format, spec_hash, revision, created_at, updated_at, registered_by)
-				VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)`,
+				VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)`,
 				svc.Namespace, svc.Name, svc.Version, svc.Owner, svc.Description, svc.GitRepoURL,
+				svc.DepartmentID, svc.DepartmentName,
 				encodeStrings(svc.Tags), encodeStrings(svc.API.Protocols), svc.BasePath, svc.HealthPath,
 				encodeAuthSchemes(svc.API.Auth), svc.API.DocsURL, svc.API.SpecURL,
 				string(in.SpecRaw), in.SpecFormat, in.SpecHash,
@@ -49,11 +51,13 @@ func (s *Store) UpsertService(ctx context.Context, in ServiceInput, actor string
 			}
 		} else {
 			if _, err := tx.ExecContext(ctx, `
-				UPDATE services SET version = ?, owner = ?, description = ?, git_repo_url = ?, tags = ?, protocols = ?,
+				UPDATE services SET version = ?, owner = ?, description = ?, git_repo_url = ?,
+				       department_id = ?, department_name = ?, tags = ?, protocols = ?,
 				       base_path = ?, health_path = ?, auth_schemes = ?, docs_url = ?, spec_url = ?,
 				       spec = ?, spec_format = ?, spec_hash = ?, updated_at = ?, registered_by = ?
 				 WHERE namespace = ? AND name = ?`,
 				svc.Version, svc.Owner, svc.Description, svc.GitRepoURL,
+				svc.DepartmentID, svc.DepartmentName,
 				encodeStrings(svc.Tags), encodeStrings(svc.API.Protocols),
 				svc.BasePath, svc.HealthPath, encodeAuthSchemes(svc.API.Auth), svc.API.DocsURL, svc.API.SpecURL,
 				string(in.SpecRaw), in.SpecFormat, in.SpecHash, formatTime(now), actor,
@@ -83,7 +87,7 @@ func (s *Store) UpsertService(ctx context.Context, in ServiceInput, actor string
 		}
 		rev, err := recordChange(ctx, tx, change{
 			Namespace: svc.Namespace, Entity: model.EntityService, Ref: svc.Ref(), Op: op, Actor: actor,
-			Detail: fmt.Sprintf("登记服务契约：%d 个端点%s", len(in.Endpoints), specNote(in)),
+			Detail: fmt.Sprintf("登记服务契约：%d 个端点%s%s", len(in.Endpoints), specNote(in), deptNote(svc)),
 		})
 		if err != nil {
 			return err
@@ -114,4 +118,17 @@ func specNote(in ServiceInput) string {
 		short = short[:8]
 	}
 	return fmt.Sprintf("（含内联 OpenAPI 规范 %s，%d 字节）", short, len(in.SpecRaw))
+}
+
+// deptNote 把部门写进变更/审计说明 ——「这个服务归哪个部门」是审计时最常被问的事实。
+func deptNote(svc model.Service) string {
+	switch {
+	case svc.DepartmentName != "" && svc.DepartmentID != "":
+		return fmt.Sprintf("，部门 %s（%s）", svc.DepartmentName, svc.DepartmentID)
+	case svc.DepartmentName != "":
+		return "，部门 " + svc.DepartmentName
+	case svc.DepartmentID != "":
+		return "，部门 " + svc.DepartmentID
+	}
+	return ""
 }

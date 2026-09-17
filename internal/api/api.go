@@ -15,6 +15,7 @@ import (
 
 	"github.com/kaulie/service-registry/internal/config"
 	"github.com/kaulie/service-registry/internal/metrics"
+	"github.com/kaulie/service-registry/internal/orgdir"
 	"github.com/kaulie/service-registry/internal/store"
 )
 
@@ -29,11 +30,22 @@ type Server struct {
 	log       *slog.Logger
 	version   string
 	startedAt time.Time
+	// org 是组织架构服务的只读目录客户端（服务契约的「部门」属性从它同步）；
+	// 未配置 REGISTRY_ORG_URL 时 Enabled()==false，一切照常、只是不去查部门目录。
+	org *orgdir.Client
 }
 
 // NewServer 构造 HTTP 服务。
 func NewServer(st *store.Store, cfg config.Config, m *metrics.Registry, log *slog.Logger, version string) *Server {
-	return &Server{store: st, cfg: cfg, metrics: m, log: log, version: version, startedAt: time.Now().UTC()}
+	return &Server{
+		store:     st,
+		cfg:       cfg,
+		metrics:   m,
+		log:       log,
+		version:   version,
+		startedAt: time.Now().UTC(),
+		org:       orgdir.NewClient(cfg.OrgURL, cfg.OrgTimeout, cfg.OrgCacheTTL),
+	}
 }
 
 // Handler 返回完整的 http.Handler（含路由与中间件）。
@@ -69,6 +81,8 @@ func (s *Server) Handler() http.Handler {
 	add(http.MethodGet, "/v1/services", s.handleListServices)
 	add(http.MethodGet, "/v1/instances/{id}", s.handleGetInstanceByID)
 	add(http.MethodGet, "/v1/search/apis", s.handleSearchAPIs)
+	// 部门目录（数据来自组织接口，本中心只取回来转给面板/消费方）
+	add(http.MethodGet, "/v1/departments", s.handleListDepartments)
 
 	// ---- 命名空间 ----
 	add(http.MethodGet, "/v1/namespaces", s.handleListNamespaces)

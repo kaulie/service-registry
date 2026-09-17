@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -44,9 +45,29 @@ type Config struct {
 	SSEKeepAlive time.Duration
 	// MaxSpecBytes 内联 OpenAPI 原文大小上限。
 	MaxSpecBytes int
+	// OrgURL 是**组织架构服务**的基地址：服务契约的「部门」属性从这里同步
+	// （`GET {OrgURL}/api/v1/departments`）。空 = 未配置（部门只能手工声明）。
+	OrgURL string
+	// OrgTimeout 单次请求组织接口的超时。
+	OrgTimeout time.Duration
+	// OrgCacheTTL 部门目录的缓存时长（0 = 不缓存，每次出网）。
+	OrgCacheTTL time.Duration
 	// ShutdownTimeout 优雅退出等待时间。
 	ShutdownTimeout time.Duration
 }
+
+// DefaultOrgURL 是组织架构服务的默认地址。
+//
+// 平台里每个服务的端口由部署契约固定，组织服务（organization）就是 4244；
+// 默认值让"部门从组织接口同步"开箱可用。要在别的环境里指到别处（或关掉这个
+// 能力）用 REGISTRY_ORG_URL：给完整地址，或给 off/none/- 表示关闭。
+const DefaultOrgURL = "http://127.0.0.1:4244"
+
+// 组织接口的默认超时与缓存时长（与 internal/orgdir 的默认值保持一致）。
+const (
+	DefaultOrgTimeout  = 3 * time.Second
+	DefaultOrgCacheTTL = 30 * time.Second
+)
 
 // Load 读取环境变量并返回配置。任何非法取值都会**快速失败**，
 // 避免把服务带进"看起来起来了但配置是错的"状态。
@@ -95,7 +116,25 @@ func Load() (Config, error) {
 		return c, fmt.Errorf("REGISTRY_WRITE_AUTH 只能是 open 或 token")
 	}
 
-	var err error
+	// 组织接口（部门的权威数据源）：默认指向本机组织服务，可 off 关闭。
+	orgURL, err := resolveOrgURL(env("REGISTRY_ORG_URL", DefaultOrgURL))
+	if err != nil {
+		return c, err
+	}
+	c.OrgURL = orgURL
+	if c.OrgTimeout, err = envDuration("REGISTRY_ORG_TIMEOUT", DefaultOrgTimeout); err != nil {
+		return c, err
+	}
+	if c.OrgCacheTTL, err = envDuration("REGISTRY_ORG_CACHE_TTL", DefaultOrgCacheTTL); err != nil {
+		return c, err
+	}
+	if c.OrgTimeout <= 0 {
+		return c, fmt.Errorf("REGISTRY_ORG_TIMEOUT 必须为正数")
+	}
+	if c.OrgCacheTTL < 0 {
+		return c, fmt.Errorf("REGISTRY_ORG_CACHE_TTL 不能为负（0 表示不缓存）")
+	}
+
 	if c.ChangeRetentionDays, err = envInt("REGISTRY_CHANGE_RETENTION_DAYS", c.ChangeRetentionDays); err != nil {
 		return c, err
 	}
@@ -184,6 +223,23 @@ func validatePortSpec(key, raw string) (string, error) {
 		return "", fmt.Errorf("%s 超出端口范围：%d（应为 1-65535）", key, n)
 	}
 	return v, nil
+}
+
+// resolveOrgURL 归一化 REGISTRY_ORG_URL：
+//   - 空 / off / none / - / disabled → ""（不启用组织接口，部门只能手工声明）
+//   - http(s):// 开头的地址 → 去掉末尾斜杠后使用
+//   - 其它取值 → 启动即失败（不带着一个用不了的地址假装跑起来）
+func resolveOrgURL(raw string) (string, error) {
+	v := strings.TrimSpace(raw)
+	switch strings.ToLower(v) {
+	case "", "off", "none", "-", "disabled", "false":
+		return "", nil
+	}
+	u, err := url.Parse(v)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return "", fmt.Errorf("REGISTRY_ORG_URL 必须是 http(s):// 开头的地址（或 off 表示不启用）：%q", raw)
+	}
+	return strings.TrimRight(v, "/"), nil
 }
 
 func env(key, def string) string {

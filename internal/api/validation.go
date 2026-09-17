@@ -18,6 +18,8 @@ const (
 	maxTagLen      = 64
 	maxTags        = 32
 	maxRepoURLLen  = 512 // gitRepoUrl（代码仓库地址）
+	maxDeptIDLen   = 64  // departmentId（组织接口里的部门 ID，如 D0001）
+	maxDeptNameLen = 128 // departmentName（部门名，中文也常见）
 )
 
 var (
@@ -66,6 +68,33 @@ func validateGitRepoURL(v string) error {
 	if !repoURLRe.MatchString(v) && !repoSCPRe.MatchString(v) {
 		return fmt.Errorf("gitRepoUrl 不合法：要仓库地址，例如 https://github.com/org/repo.git、"+
 			"ssh://git@host/org/repo.git 或 git@host:org/repo.git；当前值 %q", v)
+	}
+	return nil
+}
+
+// validateDepartment 校验部门属性（两个字段都可留空）。
+//
+// 刻意宽松：不要求部门真的存在于组织接口里（那是 resolveDepartment 的事，
+// 且只在组织接口可用时做），这里只保证"存进去的值是干净的"。
+func validateDepartment(id, name string) error {
+	if err := validateDeptField("departmentId", id, maxDeptIDLen); err != nil {
+		return err
+	}
+	return validateDeptField("departmentName", name, maxDeptNameLen)
+}
+
+func validateDeptField(kind, v string, max int) error {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return nil
+	}
+	if utf8.RuneCountInString(v) > max {
+		return fmt.Errorf("%s 过长（上限 %d 字符）", kind, max)
+	}
+	for _, r := range v {
+		if r < 0x20 || r == 0x7f {
+			return fmt.Errorf("%s 不能包含控制字符（换行/制表符等）：%q", kind, v)
+		}
 	}
 	return nil
 }

@@ -115,15 +115,22 @@ type Service struct {
 	Description string `json:"description,omitempty"`
 	// GitRepoURL 是代码仓库地址（元信息：本中心只存不 clone、不抓取，
 	// 消费方/看板/告警可以直接顺着它找到"这个服务的源码在哪"）。
-	GitRepoURL   string     `json:"gitRepoUrl,omitempty"`
-	Tags         []string   `json:"tags,omitempty"`
-	BasePath     string     `json:"basePath,omitempty"`
-	HealthPath   string     `json:"healthPath,omitempty"` // 元信息：消费方/看门狗可据此自行探活
-	API          ServiceAPI `json:"api"`
-	Revision     int64      `json:"revision,omitempty"`
-	CreatedAt    time.Time  `json:"createdAt"`
-	UpdatedAt    time.Time  `json:"updatedAt"`
-	RegisteredBy string     `json:"registeredBy,omitempty"`
+	GitRepoURL string `json:"gitRepoUrl,omitempty"`
+	// DepartmentID / DepartmentName 是**归属部门**（部门属性的两个侧面）：
+	//   - DepartmentID 是组织架构服务里的稳定标识（如 D0001），跨改名可用；
+	//   - DepartmentName 是展示名（如 SRE部门），冗余存一份，消费方不用再查组织接口。
+	// 数据来源是组织接口 `GET /api/v1/departments`（见 internal/orgdir）：
+	// 登记时按需对齐（TTL 缓存），组织接口不可达则按声明值保存（不阻塞登记）。
+	DepartmentID   string     `json:"departmentId,omitempty"`
+	DepartmentName string     `json:"departmentName,omitempty"`
+	Tags           []string   `json:"tags,omitempty"`
+	BasePath       string     `json:"basePath,omitempty"`
+	HealthPath     string     `json:"healthPath,omitempty"` // 元信息：消费方/看门狗可据此自行探活
+	API            ServiceAPI `json:"api"`
+	Revision       int64      `json:"revision,omitempty"`
+	CreatedAt      time.Time  `json:"createdAt"`
+	UpdatedAt      time.Time  `json:"updatedAt"`
+	RegisteredBy   string     `json:"registeredBy,omitempty"`
 
 	// InstanceCount 仅在列表/详情查询时填充（不落库）。
 	InstanceCount int `json:"instanceCount"`

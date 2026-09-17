@@ -17,6 +17,8 @@ CREATE TABLE IF NOT EXISTS services (
   owner         TEXT NOT NULL DEFAULT '',
   description   TEXT NOT NULL DEFAULT '',
   git_repo_url  TEXT NOT NULL DEFAULT '',
+  department_id   TEXT NOT NULL DEFAULT '',
+  department_name TEXT NOT NULL DEFAULT '',
   tags          TEXT NOT NULL DEFAULT '[]',
   protocols     TEXT NOT NULL DEFAULT '[]',
   base_path     TEXT NOT NULL DEFAULT '',

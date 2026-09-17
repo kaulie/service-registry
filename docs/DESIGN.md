@@ -35,6 +35,7 @@ Namespace（隔离域）
   name · description · token_hash · created_at · updated_at
    └─ Service（契约，低频：发版时变）
         identity : namespace · name · version · owner · git_repo_url(仓库地址，仅元信息) · tags[] · description
+        ownership: department_id · department_name（**引用组织接口的部门**，本中心不维护部门数据）
         access   : basePath · healthPath(仅元信息) · docsUrl
         api      : protocols[] · authSchemes[] · specUrl · spec(内联原文) · specHash
                    · endpoints[]（method/path/summary/operationId/tags/auth）
@@ -75,6 +76,37 @@ Namespace（隔离域）
   这也正是"不需要心跳"之后，实例集合该怎么维护的答案。
 - 匹配顺序：先按 `id`，再按 `(scheme,host,port)`。所以"换了地址但没带 id"会被记成
   "删旧 + 建新"（诚实且安全）；想表达"同一个实例换地址"，带上原 `id` 即可。
+
+### 2.4 归属部门：引用别人的权威数据（而不是抄一份）
+
+服务契约上的「部门」是**归属关系**（这个服务归哪个部门），它的权威数据在
+**组织架构服务**（organization，`GET /api/v1/departments`）——本中心**不建部门、不改部门、不维护部门**。
+
+为什么不做成"本地一张部门表"：
+
+- 部门会改名、会合并、会撤销。抄一份到注册中心，就必然出现"两份真源 + 谁对不上"；
+- 抄进来的那份还得有人维护（谁来同步？什么时候同步？冲突怎么办？）——这是无底洞。
+
+所以本中心只做三件事：
+
+| 做什么 | 怎么做 |
+|---|---|
+| 取回目录 | `internal/orgdir`：只读客户端，**按需拉取 + 短 TTL 缓存**（默认 30s）。没有常驻同步器、没有定时任务、没有后台 goroutine |
+| 登记时对齐 | `resolveDepartment()`：拿目录把 `departmentId` / `departmentName` 补全成**权威值**（部门改名后重新登记会自动纠回来） |
+| 透出给消费方 | `GET /v1/departments`：把目录 + **数据成色**（enabled/available/cached/stale/error）转给面板与消费方 |
+
+关键的取舍是**失败方向**：组织服务不可达时
+
+- 读：`GET /v1/departments` 依然 **200**，带回上次成功的目录并标 `stale=true` + `error` 说明；
+- 写：**按声明值保存**，只在响应 `departmentNote` 与日志里提醒。
+
+即"另一个服务挂了"永远不会让本中心的**写路径失败**。唯一会 400 的情况是
+**目录可用且非空、而你给的 `departmentId` 不在里面** —— 那时事实清楚（就是抄错了），
+挡下来比存一条脏引用更有价值。`departmentName` 单独给时永远只当标签，不做存在性校验，
+这样"新部门还没在组织服务里建档"也能先把服务登记进来。
+
+`internal/orgdir` 的包注释里也写了同一套语义（代码与文档同源，避免只有一处对）。
+
 
 ## 3. 变更日志：一份数据，三种用法
 
@@ -176,6 +208,7 @@ port ∈ [1,65535]；metadata ≤64 条、键 ≤128/值 ≤1024 字节。
 | `pick=round_robin` / `pick=weighted` | 轮次是**每个消费方各自的状态**。一个被多个消费方共用的注册中心无法提供正确的共享轮次（A 选完，B 的轮次被吃掉）；权重则需要额外的人工维护却没有探活数据支撑。只留无状态的 `pick=random`，其余让消费方自己做 |
 | `enabled`（人工摘流开关） | 决策：去掉。没有探活的前提下它只是"另一份需要人工同步的状态"；要摘流就 DELETE 实例，或由消费方按 metadata 过滤 |
 | 自动抓取 `specUrl` 做变更检测/兼容性告警 | 引入出网与定时任务（SSRF 面、外部依赖），且与"存储中心"的定位不符。`specHash` 已足够让消费方自己做 diff |
+| 在注册中心里维护一张"部门表"（或起一个定时同步器） | 部门数据的真源在组织架构服务，抄一份必然出现"两份真源、谁对不上"，还得有人维护同步与冲突。改成**按需拉取 + 短 TTL 缓存**（`internal/orgdir`）：没有常驻同步器、没有定时任务，组织服务挂了也不阻塞本中心读写（只降级提示） |
 | 独立前端工程（React/Vite） | 面板只需要"列表 + 表格 + 表单 + SSE"，原生 HTML/CSS/JS 零构建步骤、`go:embed` 进单二进制，部署时不存在"前端资源没跟上"的问题（与生态里部署面板的做法一致） |
 | 多节点集群 / 选主 / federation | 定位是**唯一真源**的单实例服务；引入分布式一致性会显著放大复杂度，而当前收益为零 |
 | 写接口默认要求令牌 | 需求方要求"先默认开放写权限"：唯一的真源上开放写入本身是风险（等于允许投毒），但先把链路跑通更重要。折中做法是**开放但显式可见**（启动 WARN + `/v1/meta.writeAuth` + 面板黄徽标），并把收紧做成**一个 flag**（`REGISTRY_WRITE_AUTH=token`，令牌早已生成、无需重新分发），而不是靠"删掉令牌"这种不可逆的手法 |

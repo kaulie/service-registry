@@ -14,14 +14,18 @@ import (
 // 刻意与响应结构（model.Service）保持一致，只是 api 里多出可写的 spec/specFormat——
 // 这样"GET 一个服务 → 改一改 → PUT 回去"可以闭环（便于复制/迁移服务定义）。
 type serviceWrite struct {
-	Version     string   `json:"version"`
-	Owner       string   `json:"owner"`
-	Description string   `json:"description"`
-	GitRepoURL  string   `json:"gitRepoUrl"`
-	Tags        []string `json:"tags"`
-	BasePath    string   `json:"basePath"`
-	HealthPath  string   `json:"healthPath"`
-	API         apiWrite `json:"api"`
+	Version     string `json:"version"`
+	Owner       string `json:"owner"`
+	Description string `json:"description"`
+	GitRepoURL  string `json:"gitRepoUrl"`
+	// 归属部门：DepartmentID 引用组织接口里的部门（如 D0001），DepartmentName 是展示名。
+	// 给哪个都行：服务端会拿组织接口的部门目录把另一个补全（见 resolveDepartment）。
+	DepartmentID   string   `json:"departmentId"`
+	DepartmentName string   `json:"departmentName"`
+	Tags           []string `json:"tags"`
+	BasePath       string   `json:"basePath"`
+	HealthPath     string   `json:"healthPath"`
+	API            apiWrite `json:"api"`
 }
 
 type apiWrite struct {
@@ -60,6 +64,20 @@ func (s *Server) handlePutService(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
+	// 部门属性：形状先校验，再拿组织接口的部门目录对齐（命中就补全 ID/名称）。
+	dept, err := s.resolveDepartment(r.Context(), body.DepartmentID, body.DepartmentName)
+	if err != nil {
+		s.writeError(w, r, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	body.DepartmentID, body.DepartmentName = dept.ID, dept.Name
+	if dept.Note != "" {
+		if dept.Resolved {
+			s.log.Info("部门按组织接口对齐", "service", nsName+"/"+svcName, "department", deptText(dept.ID, dept.Name))
+		} else {
+			s.log.Warn("部门未能在组织接口里对齐（按声明值保存）", "service", nsName+"/"+svcName, "note", dept.Note)
+		}
+	}
 	in, err := buildServiceInput(nsName, svcName, body)
 	if err != nil {
 		s.writeError(w, r, http.StatusBadRequest, "invalid_request", err.Error())
@@ -74,22 +92,29 @@ func (s *Server) handlePutService(w http.ResponseWriter, r *http.Request) {
 	if created {
 		status = http.StatusCreated
 	}
-	s.writeJSON(w, status, map[string]any{"service": svc, "created": created})
+	out := map[string]any{"service": svc, "created": created}
+	// 部门对齐的说明（面板会显示出来：是"已按组织接口对齐"还是"只能按声明值存"）。
+	if dept.Note != "" {
+		out["departmentNote"] = dept.Note
+	}
+	s.writeJSON(w, status, out)
 }
 
 // buildServiceInput 把请求体转成存储入参，并解析/规范化端点索引。
 func buildServiceInput(nsName, svcName string, body serviceWrite) (store.ServiceInput, error) {
 	in := store.ServiceInput{}
 	in.Service = model.Service{
-		Namespace:   nsName,
-		Name:        svcName,
-		Version:     strings.TrimSpace(body.Version),
-		Owner:       strings.TrimSpace(body.Owner),
-		Description: body.Description,
-		GitRepoURL:  strings.TrimSpace(body.GitRepoURL),
-		Tags:        trimAll(body.Tags),
-		BasePath:    strings.TrimSpace(body.BasePath),
-		HealthPath:  strings.TrimSpace(body.HealthPath),
+		Namespace:      nsName,
+		Name:           svcName,
+		Version:        strings.TrimSpace(body.Version),
+		Owner:          strings.TrimSpace(body.Owner),
+		Description:    body.Description,
+		GitRepoURL:     strings.TrimSpace(body.GitRepoURL),
+		DepartmentID:   strings.TrimSpace(body.DepartmentID),
+		DepartmentName: strings.TrimSpace(body.DepartmentName),
+		Tags:           trimAll(body.Tags),
+		BasePath:       strings.TrimSpace(body.BasePath),
+		HealthPath:     strings.TrimSpace(body.HealthPath),
 	}
 	in.Service.API = body.API.ServiceAPI
 	in.Service.API.Protocols = trimAll(in.Service.API.Protocols)
@@ -143,6 +168,9 @@ func validateServiceWrite(body *serviceWrite, maxSpecBytes int) error {
 		return errString("owner 过长（上限 128 字符）")
 	}
 	if err := validateGitRepoURL(body.GitRepoURL); err != nil {
+		return err
+	}
+	if err := validateDepartment(body.DepartmentID, body.DepartmentName); err != nil {
 		return err
 	}
 	if utf8Len(body.BasePath) > 256 {

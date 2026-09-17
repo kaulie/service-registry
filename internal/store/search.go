@@ -82,11 +82,14 @@ func (s *Store) listInstances(ctx context.Context, namespace string) ([]model.In
 
 // EndpointMatch 是"按 API 找服务"的一条命中。
 type EndpointMatch struct {
-	Namespace      string         `json:"namespace"`
-	Service        string         `json:"service"`
-	ServiceVersion string         `json:"serviceVersion,omitempty"`
-	Description    string         `json:"description,omitempty"`
-	GitRepoURL     string         `json:"gitRepoUrl,omitempty"`
+	Namespace      string `json:"namespace"`
+	Service        string `json:"service"`
+	ServiceVersion string `json:"serviceVersion,omitempty"`
+	Description    string `json:"description,omitempty"`
+	GitRepoURL     string `json:"gitRepoUrl,omitempty"`
+	// 部门跟着命中一起返回（数据来自组织接口登记的部门属性）：找接口时顺手就知道归属哪个部门。
+	DepartmentID   string         `json:"departmentId,omitempty"`
+	DepartmentName string         `json:"departmentName,omitempty"`
 	InstanceCount  int            `json:"instanceCount"`
 	MatchType      string         `json:"matchType"` // exact | template | glob
 	Endpoint       model.Endpoint `json:"endpoint"`
@@ -99,9 +102,11 @@ type EndpointFilter struct {
 	Match     string // 匹配模式：空=自动（精确→模板→通配），或 exact|template|glob
 	Namespace string
 	Tag       string
-	Query     string // 额外关键字：匹配服务名/描述/端点摘要
-	Limit     int
-	Offset    int
+	// Department 按归属部门过滤（departmentId 或 departmentName 命中其一即可）。
+	Department string
+	Query      string // 额外关键字：匹配服务名/描述/端点摘要
+	Limit      int
+	Offset     int
 }
 
 // maxSearchCandidates 限制单次检索扫描的端点数（本地注册中心规模下足够；
@@ -120,6 +125,7 @@ func (s *Store) SearchEndpoints(ctx context.Context, f EndpointFilter) ([]Endpoi
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT e.namespace, e.service, e.method, e.path, e.summary, e.operation_id, e.tags, e.auth,
 		       COALESCE(sv.version, ''), COALESCE(sv.description, ''), COALESCE(sv.git_repo_url, ''),
+		       COALESCE(sv.department_id, ''), COALESCE(sv.department_name, ''),
 		       (SELECT COUNT(1) FROM instances i WHERE i.namespace = e.namespace AND i.service = e.service)
 		FROM endpoints e LEFT JOIN services sv ON sv.namespace = e.namespace AND sv.name = e.service
 		`+where+`
@@ -139,7 +145,8 @@ func (s *Store) SearchEndpoints(ctx context.Context, f EndpointFilter) ([]Endpoi
 		)
 		if err := rows.Scan(&m.Namespace, &m.Service, &m.Endpoint.Method, &m.Endpoint.Path,
 			&m.Endpoint.Summary, &m.Endpoint.OperationID, &tags, &authStr,
-			&m.ServiceVersion, &m.Description, &m.GitRepoURL, &m.InstanceCount); err != nil {
+			&m.ServiceVersion, &m.Description, &m.GitRepoURL,
+			&m.DepartmentID, &m.DepartmentName, &m.InstanceCount); err != nil {
 			return nil, false, err
 		}
 		m.Endpoint.Tags = decodeStrings(tags)
@@ -147,7 +154,8 @@ func (s *Store) SearchEndpoints(ctx context.Context, f EndpointFilter) ([]Endpoi
 		if f.Tag != "" && !contains(m.Endpoint.Tags, f.Tag) {
 			continue
 		}
-		if f.Query != "" && !matchQuery(f.Query, m.Service, m.Description, m.GitRepoURL, m.Endpoint.Summary, m.Endpoint.Path) {
+		if f.Query != "" && !matchQuery(f.Query, m.Service, m.Description, m.GitRepoURL,
+			m.DepartmentName, m.DepartmentID, m.Endpoint.Summary, m.Endpoint.Path) {
 			continue
 		}
 		ok, kind := matcher.match(m.Endpoint.Path)
@@ -187,6 +195,11 @@ func endpointWhere(f EndpointFilter) (string, []any) {
 	if f.Namespace != "" {
 		clauses = append(clauses, "e.namespace = ?")
 		args = append(args, f.Namespace)
+	}
+	if f.Department != "" {
+		// 部门属性在 services 表上（LEFT JOIN），按 ID 或名称命中其一即可。
+		clauses = append(clauses, "(sv.department_id = ? OR sv.department_name = ?)")
+		args = append(args, f.Department, f.Department)
 	}
 	return "WHERE " + strings.Join(clauses, " AND "), args
 }
