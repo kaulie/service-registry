@@ -25,13 +25,14 @@ func (s *Server) handleListServices(w http.ResponseWriter, r *http.Request) {
 	}
 	limit := clampLimit(queryInt(r, "limit", defaultListLimit))
 	f := store.ServiceFilter{
-		Namespace: ns,
-		Tag:       strings.TrimSpace(r.URL.Query().Get("tag")),
-		Owner:     strings.TrimSpace(r.URL.Query().Get("owner")),
-		Protocol:  strings.TrimSpace(r.URL.Query().Get("protocol")),
-		Query:     strings.TrimSpace(r.URL.Query().Get("q")),
-		Limit:     limit,
-		Offset:    queryInt(r, "offset", 0),
+		Namespace:  ns,
+		Tag:        strings.TrimSpace(r.URL.Query().Get("tag")),
+		Owner:      strings.TrimSpace(r.URL.Query().Get("owner")),
+		Protocol:   strings.TrimSpace(r.URL.Query().Get("protocol")),
+		Department: strings.TrimSpace(r.URL.Query().Get("department")),
+		Query:      strings.TrimSpace(r.URL.Query().Get("q")),
+		Limit:      limit,
+		Offset:     queryInt(r, "offset", 0),
 	}
 	services, total, err := s.store.ListServices(r.Context(), f)
 	if err != nil {
@@ -150,14 +151,15 @@ func (s *Server) handleSearchAPIs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f := store.EndpointFilter{
-		Method:    strings.TrimSpace(r.URL.Query().Get("method")),
-		Path:      strings.TrimSpace(r.URL.Query().Get("path")),
-		Match:     match,
-		Namespace: ns,
-		Tag:       strings.TrimSpace(r.URL.Query().Get("tag")),
-		Query:     strings.TrimSpace(r.URL.Query().Get("q")),
-		Limit:     clampLimit(queryInt(r, "limit", defaultListLimit)),
-		Offset:    queryInt(r, "offset", 0),
+		Method:     strings.TrimSpace(r.URL.Query().Get("method")),
+		Path:       strings.TrimSpace(r.URL.Query().Get("path")),
+		Match:      match,
+		Namespace:  ns,
+		Tag:        strings.TrimSpace(r.URL.Query().Get("tag")),
+		Department: strings.TrimSpace(r.URL.Query().Get("department")),
+		Query:      strings.TrimSpace(r.URL.Query().Get("q")),
+		Limit:      clampLimit(queryInt(r, "limit", defaultListLimit)),
+		Offset:     queryInt(r, "offset", 0),
 	}
 	matches, hasMore, err := s.store.SearchEndpoints(r.Context(), f)
 	if err != nil {

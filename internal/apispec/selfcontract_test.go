@@ -34,6 +34,7 @@ func TestOwnOpenAPIContractParses(t *testing.T) {
 		{"GET", "/v1/changes"},
 		{"GET", "/v1/events"},
 		{"GET", "/v1/services"},
+		{"GET", "/v1/departments"},
 		{"GET", "/v1/search/apis"},
 		{"POST", "/v1/namespaces"},
 		{"PUT", "/v1/namespaces/{ns}/services/{svc}"},

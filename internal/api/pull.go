@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kaulie/service-registry/internal/orgdir"
 	"github.com/kaulie/service-registry/internal/store"
 )
 
@@ -140,6 +141,13 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 		"writeAuth":        writeAuth,
 		"readAuthRequired": s.cfg.ReadAuthRequired,
 		"defaultNamespace": s.cfg.DefaultNamespace,
+		// 部门属性的数据来源（组织接口）。面板/运维靠它判断"部门下拉为什么是空的"。
+		"organization": map[string]any{
+			"url":             s.org.BaseURL(),
+			"enabled":         s.org.Enabled(),
+			"departmentsPath": orgdir.DefaultPath,
+			"cacheTtlSeconds": int(s.org.CacheTTL().Seconds()),
+		},
 		"semantics": "本中心是**元信息存储中心**：只记录登记了什么，" +
 			"不探活、不心跳、不保证实例可达；可达性由消费方自行校验。",
 	})

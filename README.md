@@ -16,7 +16,7 @@
 
 | ✅ 本中心做什么 | ❌ 本中心不做什么 |
 |---|---|
-| 存储服务契约：身份、版本、owner、**代码仓库地址**、标签、**对外 API**（内联 OpenAPI 或显式端点）、文档链接 | **不探活**：不主动请求任何实例 |
+| 存储服务契约：身份、版本、owner、**归属部门**、**代码仓库地址**、标签、**对外 API**（内联 OpenAPI 或显式端点）、文档链接 | **不探活**：不主动请求任何实例 |
 | 存储实例元信息：地址、端口、自定义 metadata、来源与时间 | **不心跳**：服务运行时与本中心零连接，不需要任何常驻客户端 |
 | 变更可追溯：全局递增 `revision` + 变更日志 + 审计（谁、何时、改了什么） | **不启停**任何进程（自愈是 watchdog 的职责，它可以拉我们的数据） |
 | 提供查询 / 反查 / 快照 / 增量游标 / SSE 实时订阅给所有平台 | **不保证可用性**：不返回"健康/up"状态，可达性由消费方自行校验 |
@@ -24,6 +24,9 @@
 
 契约里的 `gitRepoUrl` / `healthPath` / `docsUrl` / `specUrl` **只是元信息字段**：本中心存着它们，
 供消费方或 watchdog 自行使用，本中心自己不会去访问（**不 clone 代码仓库**、不发任何请求）。
+
+同一套语义也适用于**归属部门**：本中心**不维护部门数据**，部门以组织架构服务
+（organization）为权威，登记契约时按它的目录对齐（见 [归属部门](#归属部门数据从组织接口同步)）。
 
 ## 快速开始
 
@@ -104,7 +107,8 @@ REGISTRY_TOKEN=rt_xxx client/register.sh \
   --service event-center --file api/openapi.yaml \
   --instance 10.0.0.7:9099 --instance 10.0.0.8:9099 \
   --owner kaulie --version 1.4.2 --tag events \
-  --git-repo https://github.com/kaulie/event-center.git   # 不传则取本地 remote.origin.url
+  --git-repo https://github.com/kaulie/event-center.git \
+  --department D0001   # 归属部门（ID 或 --department-name 名称；服务端按组织接口对齐）
 
 # 只更新契约 / 只更新实例
 client/register.sh --service event-center --file api/openapi.yaml
@@ -113,6 +117,55 @@ client/register.sh --service event-center --instance 10.0.0.7:9099 --no-contract
 
 > `client/register.sh` 是**一次性调用**：跑完就退出。它不是守护进程，不维持心跳，
 > 被登记的服务也不需要做任何改造。
+
+## 归属部门（数据从组织接口同步）
+
+服务契约上有两个部门字段，它们**引用**组织架构服务（organization）里的部门，而不是本中心自己维护的：
+
+| 字段 | 含义 |
+|---|---|
+| `departmentId` | 组织接口里的**稳定标识**（如 `D0001`）：部门改名后引用仍然有效 |
+| `departmentName` | 展示名（如 `SRE部门`）：冗余存一份，消费方不必再查组织接口 |
+
+数据怎么来的（**按需同步，没有常驻同步器**）：
+
+```bash
+# 组织架构服务的部门目录（本中心只读它，不建/不改部门）
+curl -sS http://127.0.0.1:4244/api/v1/departments
+# → {"items":[{"id":"D0001","name":"SRE部门","type":"研发"}, ...],"types":["研发","测试",...]}
+
+# 本中心把这份目录透出（短 TTL 缓存，?refresh=1 强制出网）
+curl -sS http://127.0.0.1:4240/v1/departments
+# → {"source":"organization","enabled":true,"available":true,"cached":false,"stale":false,
+#    "departments":[...],"types":[...]}
+
+# 登记时给 ID 或名称都行：服务端拿目录把另一个补全（部门改名后重新登记会自动纠回来）
+curl -sS -X PUT http://127.0.0.1:4240/v1/namespaces/team-a/services/event-center \
+  -H 'content-type: application/json' \
+  -d '{"departmentId":"D0001","api":{"protocols":["http"],"endpoints":[{"method":"GET","path":"/health"}]}}'
+# → service.departmentId=D0001、service.departmentName=SRE部门，另有 departmentNote 说明对齐结果
+
+# 按部门发现
+curl -sS 'http://127.0.0.1:4240/v1/services?department=D0001'
+curl -sS 'http://127.0.0.1:4240/v1/search/apis?method=GET&path=/health&department=D0001'
+```
+
+语义边界（刻意选的取舍）：
+
+| 情况 | 行为 |
+|---|---|
+| 两个字段都不给 | 完全不动部门，也不去问组织接口（写契约的快路径） |
+| 给了 ID 或名称，且目录里有 | 补全成**权威值**（名称/ID 都对上组织接口） |
+| 目录可用且非空，但给了查不到的 `departmentId` | **400** 挡住（挡的是脚本/手写抄错的 ID；面板下拉按构造不会错） |
+| 目录可用且非空，只给了 `departmentName` | 只当**标签**存（不校验存在性，允许"还没建档"的部门先写进来） |
+| 组织接口不可达 / 目录为空 | **按声明值保存**，只记一条提醒：本中心的写路径不能因为另一个服务挂了就失败 |
+| 清空部门 | 重新 PUT 时不带这两个字段即可（PUT 是整份契约覆盖） |
+
+组织接口不可达时 `GET /v1/departments` **依然返回 200**：`available=false` + `stale=true`
++ 上次成功的目录 + `error` 说明原因；面板据此显示"暂时不可达，用的是上次的数据"，
+而不是把整页卡在转圈上。配置见 `REGISTRY_ORG_URL`（默认 `http://127.0.0.1:4244`，`off` 关闭该能力）。
+
+## 给其他平台拉取（拉模型三件套）
 
 ## 给其他平台拉取（拉模型三件套）
 
@@ -150,8 +203,8 @@ done
 | 页签 | 能力 |
 |---|---|
 | 概览 | 实时计数、当前 revision、语义边界、各拉取接口的可复制 curl |
-| 服务目录 | **「＋ 登记服务契约」**（粘贴 OpenAPI 或手工声明端点；默认预填最小模板）、**「编辑契约」**、**「＋ 加实例」**、服务卡片含 **API 端点表**（方法/路径/说明/标签/鉴权）+ 查看/下载内联 spec + 用真实实例生成调用示例；卡片可各自「展开/收起」，**自动刷新（3s）不会把已展开的卡片收起来**，多张卡片可以同时展开；契约可带 **gitRepoUrl（代码仓库）**，列表上直接显示可点的 `repo:` 标签 |
-| API 检索 | 按方法/路径（具体路径、模板、通配）反查提供方 |
+| 服务目录 | **「＋ 登记服务契约」**（粘贴 OpenAPI 或手工声明端点；默认预填最小模板）、**「编辑契约」**、**「＋ 加实例」**、服务卡片含 **API 端点表**（方法/路径/说明/标签/鉴权）+ 查看/下载内联 spec + 用真实实例生成调用示例；卡片可各自「展开/收起」，**自动刷新（3s）不会把已展开的卡片收起来**，多张卡片可以同时展开；契约可带 **gitRepoUrl（代码仓库）** 与**归属部门**，列表上直接显示可点的 `repo:` 与 `部门:` 标签，并可按部门过滤 |
+| API 检索 | 按方法/路径（具体路径、模板、通配）反查提供方；结果里带归属部门，也可只看某个部门的接口 |
 | 实例 | **「＋ 新增实例」**、**「声明式批量同步」**（贴 JSON 数组整组对齐）、地址/metadata/来源，注销单个实例 |
 | 变更与审计 | 按 revision 时间线回溯"谁改了什么" |
 | 命名空间 | 列表、创建、轮换/清除注册令牌 |
@@ -203,9 +256,10 @@ done
 | PUT | `/v1/namespaces/{ns}/services/{svc}/instances` | **声明式整组同步实例**（CI 首选） | 写 |
 | POST | `/v1/namespaces/{ns}/services/{svc}/instances` | 登记单个实例 | 写 |
 | PATCH/DELETE | `/v1/namespaces/{ns}/services/{svc}/instances/{id}` | 改/注销实例 | 写 |
-| GET | `/v1/services` | 服务目录（`tag`/`owner`/`protocol`/`q`/分页，`q` 也匹配 `gitRepoUrl`） | 读 |
+| GET | `/v1/services` | 服务目录（`tag`/`owner`/`protocol`/`department`/`q`/分页，`q` 也匹配 `gitRepoUrl` 与部门） | 读 |
+| GET | `/v1/departments` | **部门目录**（数据来自组织架构服务，带 TTL 缓存与数据成色） | 读 |
 | GET | `/v1/instances/{id}` | 按实例 ID 全局查询 | 读 |
-| GET | `/v1/search/apis` | 反查"这个接口谁提供"（exact/template/glob） | 读 |
+| GET | `/v1/search/apis` | 反查"这个接口谁提供"（exact/template/glob，可加 `department`） | 读 |
 | GET | `/v1/snapshot` | 全量快照（ETag / 304） | 读 |
 | GET | `/v1/changes` | 增量游标（`since` / `wait` long-poll） | 读 |
 | GET | `/v1/events` | SSE 实时变更流 | 读 |
@@ -234,6 +288,9 @@ done
 | `REGISTRY_READ_AUTH` | `open` | 读接口是否要令牌（`open` / `token`） |
 | `REGISTRY_DEFAULT_NS` | `default` | 启动时自动播种的命名空间（空则不播种） |
 | `REGISTRY_MAX_SPEC_BYTES` | `262144` | 单个服务内联 OpenAPI 原文大小上限 |
+| `REGISTRY_ORG_URL` | `http://127.0.0.1:4244` | **组织架构服务**地址（部门的权威数据源）。填完整地址；`off`/`none`/`-` 表示不启用（部门只当标签） |
+| `REGISTRY_ORG_TIMEOUT` | `3s` | 单次请求组织接口的超时（必须为正数） |
+| `REGISTRY_ORG_CACHE_TTL` | `30s` | 部门目录的缓存时长（0 = 不缓存，每次出网） |
 | `REGISTRY_PULL_DEFAULT_LIMIT` / `REGISTRY_PULL_MAX_LIMIT` | `100` / `1000` | 增量拉取分页 |
 | `REGISTRY_PULL_WAIT_MAX` | `30s` | long-poll 挂起上限 |
 | `REGISTRY_SSE_KEEPALIVE` | `20s` | SSE 保活间隔 |

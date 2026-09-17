@@ -15,9 +15,12 @@ type ServiceFilter struct {
 	Tag       string
 	Owner     string
 	Protocol  string
-	Query     string
-	Limit     int
-	Offset    int
+	// Department 按**部门**过滤：departmentId 或 departmentName 命中其一即可
+	// （两个字段都存了，调用方不必先知道组织接口里那个 ID 叫什么）。
+	Department string
+	Query      string
+	Limit      int
+	Offset     int
 }
 
 // ListServices 返回服务契约列表与满足条件的总数。
@@ -90,10 +93,14 @@ func serviceWhere(f ServiceFilter) (string, []any) {
 		clauses = append(clauses, "EXISTS (SELECT 1 FROM json_each(services.protocols) WHERE value = ?)")
 		args = append(args, f.Protocol)
 	}
+	if f.Department != "" {
+		clauses = append(clauses, "(department_id = ? OR department_name = ?)")
+		args = append(args, f.Department, f.Department)
+	}
 	if f.Query != "" {
-		clauses = append(clauses, "(name LIKE ? OR description LIKE ? OR owner LIKE ? OR version LIKE ? OR git_repo_url LIKE ?)")
+		clauses = append(clauses, "(name LIKE ? OR description LIKE ? OR owner LIKE ? OR version LIKE ? OR git_repo_url LIKE ? OR department_name LIKE ? OR department_id LIKE ?)")
 		like := "%" + f.Query + "%"
-		args = append(args, like, like, like, like, like)
+		args = append(args, like, like, like, like, like, like, like)
 	}
 	if len(clauses) == 0 {
 		return "", nil

@@ -15,6 +15,10 @@
 #   client/register.sh --service event-center --file api/openapi.yaml \
 #       --git-repo https://github.com/kaulie/event-center.git
 #
+#   # 带上归属部门（部门数据的权威在组织接口，服务端会按目录把 ID/名称对齐补全）
+#   client/register.sh --service event-center --file api/openapi.yaml \
+#       --department D0001                 # 或用 --department-name SRE部门 / --department
+#
 #   # 只登记契约 / 只登记实例：
 #   client/register.sh --service event-center --file api/openapi.yaml
 #   client/register.sh --service event-center --instance 127.0.0.1:9099 --no-contract
@@ -27,6 +31,8 @@
 #   REGISTRY_TOKEN    写令牌（admin token 或该命名空间的 token）
 #   REGISTRY_NS       命名空间（默认 default）
 #   REGISTRY_GIT_REPO 代码仓库地址（等价于 --git-repo；都不给时取 remote.origin.url）
+#   REGISTRY_DEPARTMENT_ID    归属部门 ID（等价于 --department/--department-id）
+#   REGISTRY_DEPARTMENT_NAME  归属部门名（等价于 --department-name）
 #   SERVICE_PORT      注册中心监听端口（与服务端同一个变量；用于推导默认 URL）
 set -euo pipefail
 
@@ -42,6 +48,9 @@ DESCRIPTION=""
 HEALTH_PATH=""
 GIT_REPO="${REGISTRY_GIT_REPO:-}"
 NO_GIT_REPO=0
+# 归属部门（可选）：ID 或名称给一个即可，服务端会拿组织接口的部门目录把另一个补全。
+DEPARTMENT_ID="${REGISTRY_DEPARTMENT_ID:-}"
+DEPARTMENT_NAME="${REGISTRY_DEPARTMENT_NAME:-}"
 SCHEME="http"
 INSTANCES=()
 TAGS=()
@@ -65,6 +74,9 @@ while [ $# -gt 0 ]; do
     --health-path)  HEALTH_PATH="${2:?}"; shift 2 ;;
     --git-repo)     GIT_REPO="${2:?}"; shift 2 ;;
     --no-git-repo)  NO_GIT_REPO=1; shift ;;
+    --department)      DEPARTMENT_ID="${2:?}"; shift 2 ;;
+    --department-id)   DEPARTMENT_ID="${2:?}"; shift 2 ;;
+    --department-name) DEPARTMENT_NAME="${2:?}"; shift 2 ;;
     --scheme)       SCHEME="${2:?}"; shift 2 ;;
     --ns)           NS="${2:?}"; shift 2 ;;
     --url)          REGISTRY_URL="${2:?}"; shift 2 ;;
@@ -107,6 +119,7 @@ if [ "${NO_CONTRACT}" -eq 0 ]; then
   [ -f "${SPEC_FILE}" ] || { echo "找不到规范文件：${SPEC_FILE}" >&2; exit 1; }
   payload="$(SERVICE="${SERVICE}" SPEC_FILE="${SPEC_FILE}" VERSION="${VERSION}" OWNER="${OWNER}" \
              DESCRIPTION="${DESCRIPTION}" HEALTH_PATH="${HEALTH_PATH}" GIT_REPO="${GIT_REPO}" \
+             DEPARTMENT_ID="${DEPARTMENT_ID}" DEPARTMENT_NAME="${DEPARTMENT_NAME}" \
              TAGS="$(IFS=,; echo "${TAGS[*]:-}")" python3 - <<'PY'
 import json, os
 
@@ -124,6 +137,11 @@ def build():
     # 注意只在非空时带上：PUT 是整份契约覆盖，带上空值会把已有仓库地址清掉。
     if os.environ.get("GIT_REPO"):
         body["gitRepoUrl"] = os.environ["GIT_REPO"]
+    # 归属部门：同样只在非空时带上（给 ID 或名称都行，服务端按组织接口的目录对齐）。
+    if os.environ.get("DEPARTMENT_ID"):
+        body["departmentId"] = os.environ["DEPARTMENT_ID"]
+    if os.environ.get("DEPARTMENT_NAME"):
+        body["departmentName"] = os.environ["DEPARTMENT_NAME"]
     tags = [t for t in os.environ.get("TAGS", "").split(",") if t]
     if tags:
         body["tags"] = tags
@@ -145,7 +163,9 @@ PY
   fi
   python3 -c 'import json,sys; d=json.load(open("/tmp/registry-register-out.json")); \
 s=d["service"]; print("    端点 %d 个，spec=%s，revision=%s" % (len(s["api"]["endpoints"]), \
-(s["api"].get("specHash","") or "")[:8], s.get("revision")))'
+(s["api"].get("specHash","") or "")[:8], s.get("revision"))); \
+note=d.get("departmentNote"); print("    部门：%s%s" % ((s.get("departmentName") or s.get("departmentId") or "(未登记)"), \
+(" —— " + note) if note else ""))'
 fi
 
 # ---- 2) 实例集合（声明式整组对齐）----

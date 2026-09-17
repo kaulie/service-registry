@@ -62,6 +62,72 @@ func TestLoadDefaultsAndEnvOverrides(t *testing.T) {
 }
 
 // TestLoadPortPrecedence 端口来源的优先级：REGISTRY_HTTP_ADDR > SERVICE_PORT > PORT > 默认。
+// TestLoadOrganization 覆盖组织接口（部门的权威数据源）的配置解析：
+// 默认指向本机组织服务，可显式指到别处，也可 off 关掉（部门只当标签）。
+func TestLoadOrganization(t *testing.T) {
+	t.Setenv("REGISTRY_HTTP_ADDR", "127.0.0.1:0")
+
+	// 默认：开箱可用（本机 organization 服务的 4244）。
+	t.Setenv("REGISTRY_ORG_URL", "")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("加载默认配置失败：%v", err)
+	}
+	if cfg.OrgURL != DefaultOrgURL {
+		t.Fatalf("默认应指向组织服务 %q，实际 %q", DefaultOrgURL, cfg.OrgURL)
+	}
+	if cfg.OrgTimeout <= 0 || cfg.OrgCacheTTL <= 0 {
+		t.Fatalf("默认超时/缓存时长应为正数：%+v", cfg)
+	}
+
+	// 显式地址：末尾斜杠被规整掉。
+	t.Setenv("REGISTRY_ORG_URL", "http://org.internal:9000/")
+	t.Setenv("REGISTRY_ORG_TIMEOUT", "1500ms")
+	t.Setenv("REGISTRY_ORG_CACHE_TTL", "5s")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("加载配置失败：%v", err)
+	}
+	if cfg.OrgURL != "http://org.internal:9000" {
+		t.Fatalf("地址应去末尾斜杠，实际 %q", cfg.OrgURL)
+	}
+	if cfg.OrgTimeout != 1500*time.Millisecond || cfg.OrgCacheTTL != 5*time.Second {
+		t.Fatalf("超时/缓存覆盖未生效：%+v", cfg)
+	}
+
+	// off / none / - / disabled：关掉这个能力（空串 = 未配置）。
+	for _, off := range []string{"off", "none", "-", "disabled", "OFF"} {
+		t.Setenv("REGISTRY_ORG_URL", off)
+		cfg, err = Load()
+		if err != nil {
+			t.Fatalf("REGISTRY_ORG_URL=%q 应视为关闭：%v", off, err)
+		}
+		if cfg.OrgURL != "" {
+			t.Fatalf("REGISTRY_ORG_URL=%q 应归一成空串，实际 %q", off, cfg.OrgURL)
+		}
+	}
+
+	// 非法取值：启动即失败（不要带着用不了的地址假装跑起来）。
+	for _, bad := range []string{"org.internal:4244", "127.0.0.1:4244", "ftp://org/a", "://x"} {
+		t.Setenv("REGISTRY_ORG_URL", bad)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "REGISTRY_ORG_URL") {
+			t.Fatalf("REGISTRY_ORG_URL=%q 应启动即失败并点名变量，实际 err=%v", bad, err)
+		}
+	}
+
+	// 时长非法也要拦住：0/负数没有意义（0 秒超时等于永远不可达）。
+	t.Setenv("REGISTRY_ORG_URL", "")
+	t.Setenv("REGISTRY_ORG_TIMEOUT", "0")
+	if _, err := Load(); err == nil {
+		t.Fatal("REGISTRY_ORG_TIMEOUT=0 应当报错")
+	}
+	t.Setenv("REGISTRY_ORG_TIMEOUT", "")
+	t.Setenv("REGISTRY_ORG_CACHE_TTL", "-1s")
+	if _, err := Load(); err == nil {
+		t.Fatal("REGISTRY_ORG_CACHE_TTL=-1s 应当报错")
+	}
+}
+
 func TestLoadPortPrecedence(t *testing.T) {
 	clear := func() {
 		t.Setenv("REGISTRY_HTTP_ADDR", "")

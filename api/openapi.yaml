@@ -18,6 +18,12 @@ info:
       - 无论开关如何：带了合法令牌就按身份记账（审计里能看出是谁改的）；带了非法令牌一律 403。
       - 当前状态随时可从 GET /v1/meta 的 `writeAuth` 字段读到。
     error 响应统一为 `{"error":{"code":"...","message":"..."}}`。
+
+    **部门属性**：服务契约上的 `departmentId` / `departmentName` 的权威数据在
+    **组织架构服务**（organization，`GET /api/v1/departments`）——本中心不维护部门，
+    登记时按当天目录对齐（`REGISTRY_ORG_URL` 配置，短 TTL 缓存），
+    并把目录透出为 `GET /v1/departments` 供面板/消费方使用；
+    组织接口不可达时按声明值保存（不阻塞本中心的读写）。
 servers:
   - url: http://127.0.0.1:4240
 tags:
@@ -170,7 +176,11 @@ paths:
         - { in: query, name: tag, schema: { type: string } }
         - { in: query, name: owner, schema: { type: string } }
         - { in: query, name: protocol, schema: { type: string } }
-        - { in: query, name: q, schema: { type: string }, description: 关键字（名字/描述/owner/version/仓库地址） }
+        - in: query
+          name: department
+          schema: { type: string, example: D0001 }
+          description: 按**归属部门**过滤（departmentId 或 departmentName 命中其一即可）
+        - { in: query, name: q, schema: { type: string }, description: 关键字（名字/描述/owner/version/仓库地址/部门） }
         - { in: query, name: limit, schema: { type: integer, default: 200, maximum: 2000 } }
         - { in: query, name: offset, schema: { type: integer, default: 0 } }
       responses:
@@ -185,6 +195,29 @@ paths:
                   total: { type: integer }
                   limit: { type: integer }
                   offset: { type: integer }
+
+  /v1/departments:
+    get:
+      tags: [discover]
+      summary: 部门目录（**数据来自组织架构服务**，本中心只取回来转给消费方/面板）
+      description: |
+        服务契约的「部门」属性以**组织架构服务**（organization）为权威：
+        本中心不拥有部门数据，这里只是把组织服务的 `GET /api/v1/departments`
+        按短 TTL 缓存后透出，供面板做下拉、供消费方做校验/联表。
+
+        - 组织接口位置由 `REGISTRY_ORG_URL` 配置（默认 `http://127.0.0.1:4244`；
+          `off` 关闭该能力），见 GET /v1/meta 的 `organization` 字段。
+        - 组织接口不可达时**不报错**：返回 `available=false` + `stale=true` +
+          上次成功的目录 + `error` 说明，消费方据此降级（写契约也一样不被阻塞）。
+        - `source` 恒为 `organization`，用来标明"这份数据不是本中心自己编的"。
+      parameters:
+        - { in: query, name: refresh, schema: { type: boolean }, description: 强制出网刷新（跳过 TTL 缓存） }
+      responses:
+        '200':
+          description: 部门目录 + 数据成色（enabled/available/cached/stale）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DepartmentCatalog' }
 
   /v1/namespaces/{ns}/services:
     get:
@@ -231,7 +264,8 @@ paths:
         - { in: query, name: match, schema: { type: string, enum: [exact, template, glob] } }
         - { in: query, name: namespace, schema: { type: string } }
         - { in: query, name: tag, schema: { type: string }, description: 端点标签 }
-        - { in: query, name: q, schema: { type: string }, description: 关键字（服务名/描述/摘要/路径） }
+        - { in: query, name: department, schema: { type: string }, description: 只看某个部门（departmentId 或 departmentName）提供的接口 }
+        - { in: query, name: q, schema: { type: string }, description: 关键字（服务名/描述/摘要/路径/部门） }
         - { in: query, name: limit, schema: { type: integer, default: 200 } }
         - { in: query, name: offset, schema: { type: integer, default: 0 } }
       responses:
@@ -601,6 +635,32 @@ components:
         hasSpec: { type: boolean }
         endpoints: { type: array, items: { $ref: '#/components/schemas/Endpoint' } }
 
+    Department:
+      type: object
+      description: 一个部门（**字段原样来自组织架构服务**，本中心不加工/不重命名）
+      properties:
+        id: { type: string, example: D0001, description: 稳定标识（服务契约的 departmentId 引用的就是它） }
+        name: { type: string, example: SRE部门 }
+        type: { type: string, example: 研发, description: 部门类型（研发/测试/产品/管理 等，由组织接口定义） }
+
+    DepartmentCatalog:
+      type: object
+      description: |
+        部门目录 + **数据成色**（永远 200，用 available/cached/stale/error 说明这份数据能不能当权威用）。
+        组织接口不可达时返回上次成功的目录（stale=true）或空列表 + error，消费方据此降级显示。
+      properties:
+        source: { type: string, enum: [organization], description: 数据来源标识（说明"这不是本中心自己编的"） }
+        url: { type: string, description: 组织接口基地址（未配置时为空） }
+        path: { type: string, example: /api/v1/departments }
+        enabled: { type: boolean, description: 是否配置了组织接口（REGISTRY_ORG_URL） }
+        available: { type: boolean, description: 本次是否真的从组织接口取到了数据 }
+        cached: { type: boolean, description: 结果来自 TTL 缓存（未出网） }
+        stale: { type: boolean, description: 组织接口不可达，用的是上次成功的数据 }
+        fetchedAt: { type: string, format: date-time, description: 这份数据的取回时间 }
+        error: { type: string, description: 失败原因（available=false 时） }
+        departments: { type: array, items: { $ref: '#/components/schemas/Department' } }
+        types: { type: array, items: { type: string }, description: 部门类型候选（组织接口给出时） }
+
     Service:
       type: object
       description: 服务契约（低频变更）
@@ -613,6 +673,14 @@ components:
         gitRepoUrl:
           type: string
           description: 代码仓库地址（只存不 clone、不抓取；支持 https/ssh URL 与 git@host:org/repo.git 写法）
+        departmentId:
+          type: string
+          description: 归属部门 ID（**引用组织架构服务**里的稳定标识，如 D0001；组织接口见 GET /v1/departments）
+          example: D0001
+        departmentName:
+          type: string
+          description: 归属部门名（冗余存一份展示名，消费方不必再查组织接口；与 departmentId 由服务端按组织接口对齐）
+          example: SRE部门
         tags: { type: array, items: { type: string } }
         basePath: { type: string }
         healthPath: { type: string, description: 元信息：消费方/看门狗可据此自行探活 }
@@ -634,6 +702,19 @@ components:
           type: string
           description: 代码仓库地址（可留空；只校验形状，不去访问）
           example: https://github.com/kaulie/event-center.git
+        departmentId:
+          type: string
+          description: |
+            归属部门 ID（组织架构服务里的标识）。给 departmentId 或 departmentName 其一即可：
+            服务端会拿组织接口的部门目录把另一个补全（部门改名后重新登记会自动纠回来）。
+            组织接口可用且目录非空时，给了不存在的 departmentId → 400；
+            组织接口不可达时按声明值保存（**不因别的服务挂了而登记失败**）。
+            只给 departmentName 时永远只当标签存，不做存在性校验。
+          example: D0001
+        departmentName:
+          type: string
+          description: 归属部门名（与 departmentId 二选一；见 departmentId 的说明）
+          example: SRE部门
         tags: { type: array, items: { type: string } }
         basePath: { type: string }
         healthPath: { type: string, description: 必须以 / 开头 }
@@ -689,6 +770,8 @@ components:
         serviceVersion: { type: string }
         description: { type: string }
         gitRepoUrl: { type: string, description: 该服务的代码仓库地址（跟着命中一起返回，找源码不用再查一次） }
+        departmentId: { type: string, description: 该服务归属部门的 ID（数据来自组织接口） }
+        departmentName: { type: string, description: 该服务归属部门名 }
         instanceCount: { type: integer }
         matchType: { type: string, enum: [exact, template, glob] }
         endpoint: { $ref: '#/components/schemas/Endpoint' }
