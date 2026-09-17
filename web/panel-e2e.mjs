@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 // 面板端到端冒烟（需要**真实运行中**的注册中心，默认不带任何写操作）：
-//   1. 从服务上取回 go:embed 进去的 /panel/app.js（不是本地文件，验证发出去的确实是这份）；
-//   2. 在受控 DOM 里跑它，fetch 直接打真实 API；
-//   3. 断言交互：服务卡片各自可展开/收起，**自动刷新（默认 3s）不得把已展开的卡片收起来**。
+//   1. 从服务上取回 go:embed 进去的 /panel/shared.js + /panel/app.js（不是本地文件，
+//      验证发出去的确实是这份），以及**契约编辑页**（/panel/contract.html + contract.js）资源；
+//   2. 在受控 DOM 里跑它们，fetch 直接打真实 API；
+//   3. 断言交互：服务卡片各自可展开/收起、**自动刷新（默认 3s）不得把已展开的卡片收起来**，
+//      且卡片上的「编辑契约」确实是独立页面（contract.html?ns=..&name=..）的链接。
 //
 // 用法：
 //   node web/panel-e2e.mjs http://127.0.0.1:4240          # 只读（推荐）
@@ -18,8 +20,24 @@ if (!probe || !probe.ok) {
   console.log(`跳过：${BASE} 上没有可用的注册中心（先起服务，或传对地址）`);
   process.exit(0);
 }
-const appJS = await (await fetch(BASE + '/panel/app.js')).text();
-console.log(`面板资源：${BASE}/panel/app.js（${appJS.length} 字节）`);
+// 面板与契约编辑页共用 shared.js（令牌/api/toast/部门/表单反馈），
+// 所以两个脚本要按顺序跑在同一个上下文里 —— 与浏览器的加载顺序一致。
+const PAGE_SCRIPTS = ['shared.js', 'app.js'];
+const scripts = [];
+for (const name of PAGE_SCRIPTS) {
+  const text = await (await fetch(`${BASE}/panel/${name}`)).text();
+  scripts.push({ name, text });
+  console.log(`面板资源：${BASE}/panel/${name}（${text.length} 字节）`);
+}
+// 契约编辑页是独立页面：它的资源必须真的能取回来（否则「编辑契约」就是个死链）。
+// 断言放在下面 check() 定义之后跑。
+const contractAssets = {};
+for (const path of ['/panel/contract.html', '/panel/contract.js', '/panel/styles.css']) {
+  const res = await fetch(BASE + path);
+  const text = res.ok ? await res.text() : '';
+  contractAssets[path] = { ok: res.ok, status: res.status, text };
+  console.log(`面板资源：${BASE}${path}（HTTP ${res.status}，${text.length} 字节）`);
+}
 
 const handlers = new Map();
 const els = new Map();
@@ -60,6 +78,17 @@ const check = (cond, what) => {
   if (!cond) failures.push(what);
 };
 
+// 契约编辑页（独立页面）的静态资源断言
+console.log('\n场景：契约编辑页（独立页面）确实随服务一起发出去了');
+for (const [path, a] of Object.entries(contractAssets)) {
+  check(a.ok && a.text.length > 0, `${path} 可访问（HTTP ${a.status}，${a.text.length} 字节）`);
+}
+check(contractAssets['/panel/contract.html'].text.includes('contract.js'), '契约编辑页引用了 contract.js');
+check(contractAssets['/panel/contract.html'].text.includes('shared.js'), '契约编辑页引用了 shared.js');
+check(contractAssets['/panel/contract.html'].text.includes('id="svc-form-submit"'),
+  '契约编辑页里有提交按钮（表单的落点）');
+check(contractAssets['/panel/contract.js'].text.includes('initContractPage'), 'contract.js 会按 URL 初始化（登记 / 编辑）');
+
 const sandbox = {
   console,
   document: { querySelector: q, querySelectorAll: () => [], createElement: (t) => makeEl('<' + t + '>'), addEventListener() {} },
@@ -79,8 +108,13 @@ const sandbox = {
 };
 sandbox.window = sandbox;
 sandbox.globalThis = sandbox;
+// 主题开关会写 <html data-theme>（真实 DOM 里就是 documentElement）
+sandbox.document.documentElement = { setAttribute() {}, getAttribute: () => 'dark' };
+sandbox.document.title = '';
 vm.createContext(sandbox);
-vm.runInContext(appJS, sandbox, { filename: 'app.js' });
+for (const s of scripts) {
+  vm.runInContext(s.text, sandbox, { filename: s.name });
+}
 
 const click = async (sel) => {
   const fns = handlers.get(sel + '|click') || [];
@@ -138,6 +172,18 @@ if (!cards.length) {
 
 const first = cards[0];
 const summaryText = () => String((first.children[0] && first.children[0].textContent) || first.innerHTML);
+
+// 「编辑契约」必须是独立页面（contract.html?ns=..&name=..）的链接，在新页签打开。
+{
+  const cardEl = findCards(q('#svc-list'))[0];
+  const anchors = findAll(cardEl, '<a>');
+  const edit = anchors.find((a) => String(a.textContent).includes('编辑契约'));
+  check(!!edit, '服务卡片上有「编辑契约」链接');
+  check(!!edit && /^contract\.html\?ns=.+&name=.+$/.test(String(edit.href)),
+    '它指向独立页面：「' + (edit && edit.href) + '」');
+  check(!!edit && edit.target === '_blank', '在新页签打开（面板的展开状态与滚动位置不受影响）');
+}
+
 await toggle(first, true);
 check(first.open === true, '用户点开后是展开的');
 check(summaryText().startsWith('收起：') || summaryText().includes('收起'), '文案切换成「收起：…」：' + JSON.stringify(summaryText()));
