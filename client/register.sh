@@ -23,13 +23,14 @@
 #   REGISTRY_TOKEN=rt_xxx client/register.sh --service foo --file api/openapi.yaml
 #
 # 环境变量：
-#   REGISTRY_URL      注册中心地址（默认 http://127.0.0.1:4240）
+#   REGISTRY_URL      注册中心地址（默认 http://127.0.0.1:${SERVICE_PORT:-4240}）
 #   REGISTRY_TOKEN    写令牌（admin token 或该命名空间的 token）
 #   REGISTRY_NS       命名空间（默认 default）
 #   REGISTRY_GIT_REPO 代码仓库地址（等价于 --git-repo；都不给时取 remote.origin.url）
+#   SERVICE_PORT      注册中心监听端口（与服务端同一个变量；用于推导默认 URL）
 set -euo pipefail
 
-REGISTRY_URL="${REGISTRY_URL:-http://127.0.0.1:4240}"
+REGISTRY_URL="${REGISTRY_URL:-http://127.0.0.1:${SERVICE_PORT:-4240}}"
 REGISTRY_TOKEN="${REGISTRY_TOKEN:-}"
 NS="${REGISTRY_NS:-default}"
 
@@ -48,7 +49,7 @@ NO_CONTRACT=0
 NO_INSTANCES=0
 
 usage() {
-  sed -n '2,29p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 

@@ -13,6 +13,9 @@ import (
 type Config struct {
 	// HTTPAddr 监听地址，如 "127.0.0.1:4240"。
 	HTTPAddr string
+	// PortSource 记录监听端口的来源：`SERVICE_PORT` / `PORT` / `REGISTRY_HTTP_ADDR` /
+	// `default`。只用于启动日志与排查"为什么起在这个端口"。
+	PortSource string
 	// DBPath SQLite 文件路径（":memory:" 用于测试）。
 	DBPath string
 	// AdminToken 管理令牌；为空则管理接口不鉴权（仅开发/本机）。
@@ -63,9 +66,14 @@ func Load() (Config, error) {
 	}
 
 	if c.HTTPAddr == "" {
-		// 平台只注入 PORT；没给 REGISTRY_HTTP_ADDR 时按它推导。
-		port := env("PORT", "4240")
+		port, from, err := resolvePort()
+		if err != nil {
+			return c, err
+		}
+		c.PortSource = from
 		c.HTTPAddr = env("REGISTRY_BIND", "127.0.0.1") + ":" + port
+	} else {
+		c.PortSource = PortSourceAddr
 	}
 
 	switch strings.ToLower(env("REGISTRY_READ_AUTH", "open")) {
@@ -123,6 +131,60 @@ func Load() (Config, error) {
 
 // Addr 是监听地址的便捷别名。
 func (c Config) Addr() string { return c.HTTPAddr }
+
+// DefaultPort 是没有任何端口环境变量时的默认监听端口。
+const DefaultPort = "4240"
+
+// 端口来源（Config.PortSource 的取值，同时也是排查用的日志字段）。
+const (
+	// PortSourceAddr 表示直接用 REGISTRY_HTTP_ADDR 指定了完整地址。
+	PortSourceAddr = "REGISTRY_HTTP_ADDR"
+	// PortSourceDefault 表示没读到任何端口环境变量，用了 DefaultPort。
+	PortSourceDefault = "default"
+)
+
+// portEnvKeys 是端口环境变量的优先级（先出现的优先）：
+//
+//	SERVICE_PORT —— 本服务自己的端口变量（意图最明确，也最不容易被环境里别的
+//	                通用变量污染：宿主机常见的 PORT=4211 之类是给别的进程用的）
+//	PORT         —— 平台/容器约定的通用注入变量
+//
+// 想直接指定完整监听地址（含 IP）时用 REGISTRY_HTTP_ADDR，它的优先级最高；
+// 只想换绑定的 IP 用 REGISTRY_BIND。
+var portEnvKeys = []string{"SERVICE_PORT", "PORT"}
+
+// resolvePort 按优先级找端口；一个都没读到就用 DefaultPort。
+// 返回 (端口, 来源, 错误)：来源是命中的环境变量名，或 PortSourceDefault。
+func resolvePort() (string, string, error) {
+	for _, key := range portEnvKeys {
+		raw, ok := os.LookupEnv(key)
+		if !ok || strings.TrimSpace(raw) == "" {
+			continue // 读不到（未设置或空串）→ 看下一个；都没有 → 默认
+		}
+		port, err := validatePortSpec(key, raw)
+		if err != nil {
+			return "", "", err
+		}
+		return port, key, nil
+	}
+	return DefaultPort, PortSourceDefault, nil
+}
+
+// validatePortSpec 校验端口取值：必须是 1-65535 的整数。
+//
+// 这里刻意**快速失败**而不是悄悄回落到默认端口：配错了却起在别的端口上，
+// 比启动即报错难查得多（比如探活一直失败，却看不出监听地址跟预期不一样）。
+func validatePortSpec(key, raw string) (string, error) {
+	v := strings.TrimSpace(raw)
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return "", fmt.Errorf("%s 不是合法端口：%q（应为 1-65535 的整数）", key, raw)
+	}
+	if n < 1 || n > 65535 {
+		return "", fmt.Errorf("%s 超出端口范围：%d（应为 1-65535）", key, n)
+	}
+	return v, nil
+}
 
 func env(key, def string) string {
 	if v, ok := os.LookupEnv(key); ok && strings.TrimSpace(v) != "" {

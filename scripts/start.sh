@@ -7,6 +7,10 @@
 #   RUNTIME_DIR = runtimeDir
 #   APP_VERSION = 本次部署的 8 位短 hash
 #
+# 监听端口的来源（优先级从高到低）：SERVICE_PORT > PORT > 默认 4240。
+# SERVICE_PORT 是本服务自己的变量：宿主机上常有别的进程设了通用 PORT，
+# 想固定本服务端口时用 SERVICE_PORT 更不容易被带偏。
+#
 # runtime 布局（backend/ 下的内容由平台在部署时保留，不会被 --delete 清掉）：
 #   bin/registryd           可执行文件（来自发版包）
 #   scripts/*.sh            本目录（来自发版包）
@@ -18,7 +22,7 @@ set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNTIME_DIR="${RUNTIME_DIR:-$(cd "${DIR}/.." && pwd)}"
-PORT="${PORT:-4240}"
+PORT="${SERVICE_PORT:-${PORT:-4240}}"
 APP_VERSION="${APP_VERSION:-dev}"
 
 BIN="${RUNTIME_DIR}/bin/registryd"
@@ -30,6 +34,14 @@ LOG_FILE="${BACKEND}/server.log"
 
 log() { echo "[start] $*"; }
 die() { echo "[start][错误] $*" >&2; exit 1; }
+
+# 端口必须是数字：写错了直接退出（不要带着错的端口起服务，探活会一直失败却看不出原因）。
+case "${PORT}" in
+  *[!0-9]*|"") die "端口必须是 1-65535 的整数，当前：${PORT}（来自 SERVICE_PORT/PORT）" ;;
+esac
+if [ "${PORT}" -lt 1 ] || [ "${PORT}" -gt 65535 ]; then
+  die "端口超出范围：${PORT}（SERVICE_PORT/PORT 应为 1-65535）"
+fi
 
 [ -x "${BIN}" ] || die "缺少可执行文件 ${BIN}（发版包内容不完整？）"
 
@@ -43,6 +55,7 @@ if [ ! -f "${ENV_FILE}" ]; then
   TOKEN="$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
   cat > "${ENV_FILE}" <<EOF
 # service-registry 运行期配置（首次启动自动生成，权限 600，请勿提交到 git）
+# 监听端口不在这里配置：由环境变量 SERVICE_PORT（优先）或 PORT 决定，都没有则 4240。
 # 管理令牌：合法令牌会被记进审计（actor=admin / ns:<name>）；令牌本身永不出库。
 REGISTRY_ADMIN_TOKEN=${TOKEN}
 # 写接口是否要求令牌。默认 open：不带令牌也能登记（本机/内网先跑通链路）。
@@ -63,7 +76,8 @@ fi
 # shellcheck disable=SC1090
 set -a; . "${ENV_FILE}"; set +a
 
-# 平台注入的值优先：端口永远跟随服务契约的 healthUrl。
+# 监听地址按端口推导（端口来源见脚本头的优先级说明；这也是服务契约 healthUrl 里的那个端口）。
+# 注意 .env 里即便写了旧的 REGISTRY_HTTP_ADDR 也不生效：契约换端口后不能被陈旧值卡住。
 export REGISTRY_HTTP_ADDR="${REGISTRY_BIND:-127.0.0.1}:${PORT}"
 export REGISTRY_DB_PATH="${REGISTRY_DB_PATH:-${DATA_DIR}/registry.db}"
 

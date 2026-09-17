@@ -39,7 +39,7 @@ fmt-check:
 vet:
 	go vet ./...
 
-run: ## 本机运行（数据落在 ./data/registry.db，监听 127.0.0.1:4240）
+run: ## 本机运行（数据落在 ./data/registry.db；端口取 SERVICE_PORT，其次 PORT，默认 4240）
 	go run $(PKG)
 
 panel-check: ## 检查面板资源是否可被 go:embed 编入（防止漏文件）

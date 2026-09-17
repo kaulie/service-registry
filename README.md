@@ -224,8 +224,10 @@ done
 
 | 环境变量 | 默认 | 说明 |
 |---|---|---|
-| `REGISTRY_HTTP_ADDR` | `127.0.0.1:$PORT`（PORT 默认 4240） | 监听地址 |
-| `REGISTRY_BIND` | `127.0.0.1` | 未显式给地址时用的绑定 IP |
+| `SERVICE_PORT` | 空 | **本服务监听端口**（优先级高于 `PORT`）。读不到就用 `PORT`，再读不到用 `4240`。非法值（非 1-65535 整数）启动即失败 |
+| `PORT` | 空 | 平台/容器常用的通用端口变量；只有 `SERVICE_PORT` 读不到时才用它 |
+| `REGISTRY_HTTP_ADDR` | 空 | 完整监听地址（如 `127.0.0.1:4240`）；给了它就不再关心上面的端口变量（优先级最高） |
+| `REGISTRY_BIND` | `127.0.0.1` | 未显式给地址时用的绑定 IP（端口仍来自 `SERVICE_PORT`/`PORT`） |
 | `REGISTRY_DB_PATH` | `./data/registry.db` | SQLite 路径（`:memory:` 用于测试） |
 | `REGISTRY_ADMIN_TOKEN` | 空* | admin 令牌；合法令牌会被记入审计（`actor=admin`） |
 | `REGISTRY_WRITE_AUTH` | **`open`** | 写接口是否要令牌：`open`（默认，无需令牌） / `token`（需令牌） |
@@ -244,6 +246,28 @@ done
 改成 `REGISTRY_WRITE_AUTH=token` 重启即可收紧。
 
 非法取值会**启动即失败**（不会带着错误配置假装跑起来）。
+
+### 监听端口的优先级
+
+```
+REGISTRY_HTTP_ADDR   ← 直接给完整地址（最高）
+  > SERVICE_PORT     ← 本服务自己的端口（推荐）
+  > PORT             ← 平台/容器通用变量
+  > 4240             ← 都没读到时的默认
+```
+
+`SERVICE_PORT` 与 `PORT` 都为空串或未设置时按"读不到"处理，继续往下回落。启动日志里会带上
+`portFrom=SERVICE_PORT|PORT|REGISTRY_HTTP_ADDR|default`，排查"为什么起在这个端口"一眼可见。
+
+```bash
+SERVICE_PORT=5000 ./bin/registryd          # 起在 127.0.0.1:5000
+PORT=5000 ./bin/registryd                  # 同上（没给 SERVICE_PORT 时 PORT 生效）
+SERVICE_PORT=5000 PORT=9000 ./bin/registryd # → 5000：本服务的变量优先
+```
+
+> 部署脚本 `scripts/start.sh` 用同一套优先级（`SERVICE_PORT` > `PORT` > 4240），并把结果注入
+> `REGISTRY_HTTP_ADDR`；契约登记脚本 `deploy/platform/register-service.sh` 的 healthUrl 端口也同样
+> 默认取 `SERVICE_PORT`，所以"登记的端口"和"实际监听的端口"不会对不上。
 
 ## 部署
 

@@ -11,7 +11,7 @@
 | 发版包 | `outputs/` 的完整内容 + `VERSION` / `COMMIT` / `GIT_REPO_URL`（后三者由调用方写入） |
 | 部署 | 下载制品 → `rsync -a --delete` 到 `runtimeDir` → 执行 `restartCmd` → 探活 `healthUrl` |
 | 保留路径 | 只有 `backend/.env`、`backend/data/`、`backend/runtime.pid`、`backend/server.log` 会在部署时保留，其余一律被包内容替换 |
-| 注入环境 | `restartCmd` 以 cwd=`runtimeDir` 执行，并注入 `PORT`（取自 healthUrl）、`RUNTIME_DIR`、`APP_VERSION` |
+| 注入环境 | `restartCmd` 以 cwd=`runtimeDir` 执行，并注入 `PORT`（取自 healthUrl）、`RUNTIME_DIR`、`APP_VERSION`。本服务的 `scripts/start.sh` 用 `SERVICE_PORT` > `PORT` > `4240` 决定端口，登记脚本 `deploy/platform/register-service.sh` 的 healthUrl 也默认取 `SERVICE_PORT` |
 | 健康检查 | 约定 `http://127.0.0.1:<port>/health`（应用同时保留 `/healthz`） |
 
 ## 本项目的落地
