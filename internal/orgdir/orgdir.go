@@ -48,6 +48,11 @@ type Department struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 	Type string `json:"type,omitempty"` // 研发 / 测试 / 产品 / 管理
+	// ParentID 是**可选的**上级部门 ID：组织接口给这个字段时，说明部门自己就是一棵树
+	// （集团 → 事业群 → 部门）。本中心**不做任何层级加工**（不校验父是否存在、不排序），
+	// 只原样透出，由消费方决定怎么摆 —— 面板的「服务树」页签就是拿它来把部门挂成层级。
+	// 为空 = 顶层部门（当前的扁平目录就是这个形态，行为与没有这个字段时完全一致）。
+	ParentID string `json:"parentId,omitempty"`
 }
 
 // Label 返回「名称（ID）」形式的人类可读标签（错误提示与审计说明用）。
@@ -208,6 +213,7 @@ func (c *Client) fetch(ctx context.Context) Snapshot {
 		d.ID = strings.TrimSpace(d.ID)
 		d.Name = strings.TrimSpace(d.Name)
 		d.Type = strings.TrimSpace(d.Type)
+		d.ParentID = strings.TrimSpace(d.ParentID)
 		if d.ID == "" && d.Name == "" {
 			continue // 既没 ID 也没名字的条目没有意义，直接丢掉
 		}

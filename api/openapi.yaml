@@ -642,6 +642,13 @@ components:
         id: { type: string, example: D0001, description: 稳定标识（服务契约的 departmentId 引用的就是它） }
         name: { type: string, example: SRE部门 }
         type: { type: string, example: 研发, description: 部门类型（研发/测试/产品/管理 等，由组织接口定义） }
+        parentId:
+          type: string
+          example: D0001
+          description: |
+            可选的上级部门 ID：组织接口给这个字段说明部门自己就是一棵树（集团 → 事业群 → 部门）。
+            本中心**原样透出、不做层级加工**（不校验父是否存在），面板的「服务树」页签用它把部门摆成层级；
+            为空 = 顶层部门（扁平目录就是这个形态）。
 
     DepartmentCatalog:
       type: object
