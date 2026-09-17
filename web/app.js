@@ -1,79 +1,53 @@
 'use strict';
 
-// Service Registry 控制面板：纯原生 JS，所有数据都通过公开只读接口拉取。
+// Service Registry 控制面板（index.html）：纯原生 JS，所有数据都通过公开只读接口拉取。
 // 写操作（创建命名空间 / 轮换令牌 / 删除实例）需要令牌，填写在右上角。
+//
+// 这里只放"面板"自己的东西：页签、服务目录、服务树、实例、变更、命名空间、事件流。
+// 与契约编辑页（contract.html + contract.js）共用的工具在 shared.js（先于本文件加载）：
+// 令牌读写、api()、toast、部门目录、表单反馈。
+// 登记 / 编辑契约 **不在面板里内联**，而是在独立页面 contract.html 打开（见服务卡片上的「编辑契约」）。
 
-const $ = (sel) => document.querySelector(sel);
-const el = (tag, cls, text) => {
-  const node = document.createElement(tag);
-  if (cls) node.className = cls;
-  if (text !== undefined) node.textContent = text;
-  return node;
-};
-const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({
-  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[c]));
-
-let TOKEN_KEY = 'service-registry-token';
-$('#token').value = localStorage.getItem(TOKEN_KEY) || '';
-$('#token').addEventListener('change', () => {
-  localStorage.setItem(TOKEN_KEY, $('#token').value);
-});
-
-function authHeaders() {
-  const t = $('#token').value.trim();
-  return t ? { 'X-Registry-Token': t } : {};
-}
-
-async function api(path, opts = {}) {
-  const init = { method: opts.method || 'GET', headers: { ...authHeaders() } };
-  if (opts.body !== undefined) {
-    init.headers['Content-Type'] = 'application/json';
-    init.body = JSON.stringify(opts.body);
-  }
-  const res = await fetch(path, init);
-  let data = null;
-  const text = await res.text();
-  if (text) {
-    try { data = JSON.parse(text); } catch (_) { data = { raw: text }; }
-  }
-  return { ok: res.ok, status: res.status, data };
-}
-
-function toast(msg, bad) {
-  const t = $('#toast');
-  t.textContent = msg;
-  t.className = bad ? 'toast toast--bad' : 'toast';
-  t.hidden = false;
-  clearTimeout(toast._timer);
-  toast._timer = setTimeout(() => { t.hidden = true; }, bad ? 8000 : 4000);
-}
-
-function fmtTime(iso) {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  if (isNaN(d)) return iso;
-  return d.toLocaleString();
-}
-
-function shortHash(h) { return h ? h.slice(0, 8) : ''; }
-
-function methodBadge(m) {
-  return `<span class="method method--${m}">${esc(m)}</span>`;
-}
+// 令牌输入框 + 主题开关（换页签/刷新都保持）：两个页面共用同一套实现。
+mountTokenInput('#token');
+mountThemeToggle('#theme-toggle');
 
 // ---- 页签 ----
 let activeTab = 'overview';
+const TAB_NAMES = ['overview', 'services', 'tree', 'apis', 'instances', 'changes', 'namespaces', 'stream'];
+
+function activateTab(name) {
+  if (!TAB_NAMES.includes(name)) return false;
+  const btn = document.querySelector(`.tab[data-tab="${name}"]`);
+  if (!btn) return false;
+  document.querySelectorAll('.tab').forEach((b) => b.classList.remove('tab--active'));
+  document.querySelectorAll('.tabpanel').forEach((p) => p.classList.remove('tabpanel--active'));
+  btn.classList.add('tab--active');
+  activeTab = name;
+  const panel = $('#tab-' + name);
+  if (panel) panel.classList.add('tabpanel--active');
+  refreshActive();
+  return true;
+}
+
 document.querySelectorAll('.tab').forEach((btn) => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach((b) => b.classList.remove('tab--active'));
-    document.querySelectorAll('.tabpanel').forEach((p) => p.classList.remove('tabpanel--active'));
-    btn.classList.add('tab--active');
-    activeTab = btn.dataset.tab;
-    $('#tab-' + activeTab).classList.add('tabpanel--active');
-    refreshActive();
+    activateTab(btn.dataset.tab);
+    // 把页签写进地址栏（#services）：刷新/分享/从契约编辑页返回时能落到同一个页签。
+    if (typeof history !== 'undefined' && history.replaceState) {
+      try { history.replaceState(null, '', '#' + btn.dataset.tab); } catch (_) { /* 忽略 */ }
+    }
   });
 });
+
+// 地址栏里的 #页签 优先（契约编辑页的「← 返回面板」就是回到 ./#services）。
+{
+  const hashTab = String((location && location.hash) || '').replace(/^#/, '');
+  if (hashTab && TAB_NAMES.includes(hashTab)) {
+    activateTab(hashTab);
+    activeTab = hashTab;
+  }
+}
 
 function refreshActive() {
   switch (activeTab) {
@@ -160,138 +134,6 @@ async function renderOverview() {
     `# 5) 部门目录：数据来自组织架构服务（organization），本中心只透出（短 TTL 缓存）`,
     `curl -sS ${base}/v1/departments`,
   ].join('\n');
-}
-
-// ---- 部门（数据来自组织架构服务，本中心只取回来透出） ----
-// 服务契约的「部门」属性以**组织架构服务**（organization）为权威：
-// 本中心不维护部门，只把组织接口的 `GET /api/v1/departments` 目录取回来，供
-// ① 登记/编辑表单的下拉 ② 服务目录按部门过滤 ③ 卡片与检索结果展示 用。
-//
-// 下拉选项的 key 用 `id:<部门ID>` / `name:<部门名>`（而不是下标），
-// 这样"只有名字"的部门（组织接口不可达时按声明值保存的）也不会在下拉里丢掉，
-// 重新渲染（自动刷新每 3s）时用户的选择也不会被重置。
-let deptCatalog = { departments: [], loaded: false };
-
-function deptText(d) {
-  const id = String((d && d.id) || '').trim();
-  const name = String((d && d.name) || '').trim();
-  if (id && name) return `${name}（${id}）`;
-  return name || id;
-}
-
-// deptByKey 把下拉的 key 还原成 {id, name}：key 里带的就是权威值，不查目录也能还原。
-function deptByKey(key) {
-  const k = String(key || '');
-  if (k.startsWith('id:')) {
-    const id = k.slice(3);
-    const hit = (deptCatalog.departments || []).find((d) => String(d.id || '').trim() === id);
-    return { id, name: (hit && String(hit.name || '').trim()) || '' };
-  }
-  if (k.startsWith('name:')) return { id: '', name: k.slice(5) };
-  return null;
-}
-
-// 一个服务归属的部门：ID 优先（跨改名稳定），其次名字。
-function svcDeptKey(svc) {
-  const id = String((svc && svc.departmentId) || '').trim();
-  const name = String((svc && svc.departmentName) || '').trim();
-  if (id) return 'id:' + id;
-  if (name) return 'name:' + name;
-  return '';
-}
-
-function svcDeptMatches(svc, key) {
-  if (!key) return true;
-  const d = deptByKey(key);
-  if (!d) return true;
-  if (d.id) return String(svc.departmentId || '').trim() === d.id;
-  return String(svc.departmentName || '').trim() === d.name;
-}
-
-function deptTag(svc) {
-  // 卡片上显示**这个服务自己存的**部门（ID + 名称），不查目录：
-  // 目录可能暂时取不到，但"它登记的是哪个部门"是事实，必须照实显示。
-  const label = deptText({ id: svc && svc.departmentId, name: svc && svc.departmentName });
-  if (!label) return '';
-  return `<span class="tag" title="${esc(`归属部门：${label}（数据来自组织接口，非本中心自编）`)}">部门:${esc(label)}</span>`;
-}
-
-// loadDepartments 拉一次部门目录。force=true 时带 ?refresh=1 跳过服务端 TTL 缓存。
-// 刻意不抛异常：组织接口不可达时目录里会带上 error/available，面板照常可用。
-async function loadDepartments(force) {
-  const res = await api('/v1/departments' + (force ? '?refresh=1' : ''));
-  if (!res.ok || !res.data || typeof res.data !== 'object') {
-    deptCatalog = {
-      departments: [], loaded: true, enabled: true, available: false,
-      error: res.ok ? '响应不是 JSON 目录' : errText(res.data),
-    };
-    return deptCatalog;
-  }
-  const cat = res.data;
-  cat.departments = Array.isArray(cat.departments) ? cat.departments : [];
-  cat.loaded = true;
-  deptCatalog = cat;
-  return cat;
-}
-
-// deptChoices 把"组织接口里的部门"和"服务契约上实际用到的部门"合成候选：
-// 后者是为了不让组织接口不可达时按声明值保存的部门从界面上消失（否则编辑时会被清掉）。
-function deptChoices(services) {
-  const map = new Map();
-  const add = (id, name) => {
-    id = String(id || '').trim();
-    name = String(name || '').trim();
-    if (!id && !name) return;
-    const key = id ? 'id:' + id : 'name:' + name;
-    const cur = map.get(key);
-    if (!cur) { map.set(key, { key, id, name }); return; }
-    if (!cur.name && name) cur.name = name; // 同一个 ID 在别处带了名字，补上
-    if (!cur.id && id) cur.id = id;
-  };
-  (deptCatalog.departments || []).forEach((d) => add(d.id, d.name));
-  (services || []).forEach((s) => add(s.departmentId, s.departmentName));
-  return [...map.values()].sort((a, b) => deptText(a).localeCompare(deptText(b), 'zh'));
-}
-
-// fillDeptSelects 刷新三处下拉（表单 / 服务目录过滤 / API 检索过滤），
-// 并尽量保留用户当前的选择（选项没变时下拉内容不变）。
-function fillDeptSelects(services) {
-  const choices = deptChoices(services);
-  const opts = choices.map((c) => `<option value="${esc(c.key)}">${esc(deptText(c))}</option>`).join('');
-  const fill = (sel, emptyText) => {
-    if (!sel) return;
-    const keep = sel.value;
-    sel.innerHTML = `<option value="">${esc(emptyText)}</option>` + opts;
-    sel.value = choices.some((c) => c.key === keep) ? keep : '';
-  };
-  fill($('#svc-form-dept'), '（不指定部门）');
-  fill($('#svc-dept-filter'), '全部部门');
-  fill($('#api-dept'), '全部部门');
-}
-
-// renderDeptNote 把"部门目录的成色"写在表单里：
-// 下拉为空时用户至少能看到是"没配置组织接口"还是"组织接口暂时不可达"。
-function renderDeptNote() {
-  const node = $('#svc-form-dept-note');
-  if (!node) return;
-  const c = deptCatalog;
-  const n = (c.departments || []).length;
-  const say = (msg, warn) => {
-    node.textContent = msg;
-    node.className = 'note grow' + (warn ? ' note--warn' : '');
-  };
-  if (!c.enabled) {
-    say('组织接口未配置（REGISTRY_ORG_URL）：部门只当标签保存，不做对齐。', true);
-    return;
-  }
-  if (c.available) {
-    say(`已从组织接口同步 ${n} 个部门${c.cached ? '（缓存）' : ''}`
-      + (c.url ? ` · ${c.url}` : '')
-      + (c.fetchedAt ? ` · ${fmtTime(c.fetchedAt)}` : ''));
-    return;
-  }
-  say(`组织接口暂时不可达：${c.error || '未知原因'}`
-    + (n ? `；下面用的是上次同步的 ${n} 个部门（stale）` : '；此时部门按声明值保存，不影响登记'), true);
 }
 
 // ---- 服务目录 ----
@@ -470,9 +312,14 @@ function serviceCard(svc) {
     document.querySelector('.tab[data-tab="instances"]').click();
   });
   actions.appendChild(instBtn);
-  const editBtn = el('button', 'btn btn--small', '编辑契约');
-  editBtn.addEventListener('click', () => openServiceForm(svc));
-  actions.appendChild(editBtn);
+  // 「编辑契约」是**独立页面**的链接（contract.html?ns=..&name=..），在新页签打开：
+  // 面板的滚动位置、已展开的卡片都不受影响；编辑页保存后回到面板就是最新的（3s 自动刷新）。
+  const editLink = el('a', 'btn btn--small', '编辑契约 ↗');
+  editLink.href = `contract.html?ns=${ns}&name=${name}`;
+  editLink.target = '_blank';
+  editLink.rel = 'noopener';
+  editLink.title = '在新页签打开契约编辑页';
+  actions.appendChild(editLink);
   const addInstBtn = el('button', 'btn btn--small', '＋ 加实例');
   addInstBtn.addEventListener('click', () => {
     $('#inst-service').value = svc.namespace + '/' + svc.name;
@@ -1020,295 +867,6 @@ function toggleStream() {
   };
 }
 
-// ---- 面板写入口：登记 / 编辑服务契约 ----
-function show(node, on) { node.hidden = !on; }
-function parseList(s) {
-  return String(s || '').split(',').map((x) => x.trim()).filter(Boolean);
-}
-function parseKV(s) {
-  const out = {};
-  parseList(s).forEach((pair) => {
-    const i = pair.indexOf('=');
-    if (i > 0) out[pair.slice(0, i).trim()] = pair.slice(i + 1).trim();
-  });
-  return out;
-}
-function errText(data) {
-  if (data && data.error && data.error.message) return data.error.message;
-  return JSON.stringify(data);
-}
-async function fetchText(path) {
-  const res = await fetch(path, { headers: { ...authHeaders() } });
-  return res.ok ? res.text() : '';
-}
-
-async function fillNamespaceSelect(prefer) {
-  const sel = $('#svc-form-ns');
-  const res = await api('/v1/namespaces');
-  const list = (res.ok && res.data.namespaces) || [];
-  sel.innerHTML = list.map((n) => `<option value="${esc(n.name)}">${esc(n.name)}</option>`).join('');
-  if (prefer && list.some((n) => n.name === prefer)) sel.value = prefer;
-  return list;
-}
-
-function epRow(ep) {
-  const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
-  const tr = document.createElement('tr');
-  tr.innerHTML = `
-    <td><select class="ep-method">${methods.map((m) =>
-      `<option${ep && ep.method === m ? ' selected' : ''}>${m}</option>`).join('')}</select></td>
-    <td><input class="ep-path" placeholder="/v1/things/{id}" value="${esc(ep ? ep.path : '')}" /></td>
-    <td><input class="ep-summary" placeholder="说明" value="${esc(ep && ep.summary ? ep.summary : '')}" /></td>
-    <td><button class="btn btn--small btn--danger" type="button">删</button></td>`;
-  tr.querySelector('button').addEventListener('click', () => tr.remove());
-  return tr;
-}
-
-function setEpRows(list) {
-  const tbody = $('#svc-form-eps tbody');
-  tbody.innerHTML = '';
-  (list && list.length ? list : [null]).forEach((ep) => tbody.appendChild(epRow(ep)));
-}
-
-function setApiMode(mode) {
-  $('#svc-form-mode').value = mode;
-  show($('#svc-form-spec-wrap'), mode === 'spec');
-  show($('#svc-form-manual-wrap'), mode === 'manual');
-}
-
-// ---- 表单反馈：绝不静默 ----
-// 教训：本地校验失败时只写一个 12px 灰字，看起来就是"点了没反应、也不提示哪里错"。
-// 现在统一走 formFail：红色常驻提示 + toast（表单不在视口也能看到）+ 标出出错字段。
-function setHint(node, msg, kind) {
-  node.textContent = msg || '';
-  node.className = 'hint' + (kind ? ' hint--' + kind : '');
-}
-function clearFieldErrors(scope) {
-  scope.querySelectorAll('.field-error').forEach((el) => el.classList.remove('field-error'));
-}
-function markField(el) {
-  if (!el) return;
-  el.classList.add('field-error');
-  if (el.focus) el.focus();
-  if (el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
-}
-function formFail(hintNode, msg, fieldEl) {
-  setHint(hintNode, '⚠ ' + msg, 'error');
-  toast(msg, true);
-  markField(fieldEl);
-}
-function formOK(hintNode, msg) {
-  setHint(hintNode, '✓ ' + msg, 'ok');
-}
-// 提交期间禁用按钮并改文案：避免连点，也避免"点了没反应"的错觉。
-async function withBusy(btn, busyText, fn) {
-  const old = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = busyText;
-  try {
-    return await fn();
-  } finally {
-    btn.disabled = false;
-    btn.textContent = old;
-  }
-}
-// 任何未捕获的脚本异常都变成可见提示（否则用户只会看到"没反应"）。
-window.addEventListener('error', (e) => {
-  toast('面板脚本出错：' + ((e && (e.message || e.error)) || 'unknown'), true);
-});
-window.addEventListener('unhandledrejection', (e) => {
-  const r = e && e.reason;
-  toast('面板请求出错：' + ((r && r.message) || r), true);
-});
-
-// 最小可用的 OpenAPI 模板：让"不粘贴 spec 直接提交"也能成功，而不是卡在校验上。
-function specTemplate(name) {
-  return [
-    'openapi: 3.0.3',
-    'info:',
-    '  title: ' + (name || 'my-service'),
-    '  version: 0.1.0',
-    'description: 面板生成的最小模板 —— 把 paths 换成真实接口，或整段替换为你们仓库里的 openapi.yaml',
-    'paths:',
-    '  /health:',
-    '    get:',
-    '      summary: 健康检查',
-    '',
-  ].join('\n');
-}
-let lastSpecTemplate = '';
-function prefillSpecTemplate(force) {
-  const spec = $('#svc-form-spec');
-  const tpl = specTemplate($('#svc-form-name').value.trim());
-  if (force || !spec.value.trim() || spec.value === lastSpecTemplate) {
-    spec.value = tpl;
-  }
-  lastSpecTemplate = tpl;
-}
-
-// openServiceForm(null) = 登记新服务；传服务对象 = 编辑（服务名不可改：它是身份）。
-async function openServiceForm(svc) {
-  await fillNamespaceSelect(svc ? svc.namespace : undefined);
-  // 部门下拉：候选来自组织接口（上次拉到的目录即可，打开表单不额外出网）。
-  if (!deptCatalog.loaded) { await loadDepartments(false); }
-  fillDeptSelects(lastServices);
-  const f = {
-    ns: $('#svc-form-ns'), name: $('#svc-form-name'), version: $('#svc-form-version'),
-    owner: $('#svc-form-owner'), health: $('#svc-form-health'), desc: $('#svc-form-desc'),
-    tags: $('#svc-form-tags'), docs: $('#svc-form-docs'), repo: $('#svc-form-repo'),
-    specurl: $('#svc-form-specurl'), spec: $('#svc-form-spec'), dept: $('#svc-form-dept'),
-  };
-  renderDeptNote();
-  if (svc) {
-    $('#svc-form-title').textContent = `编辑服务契约 ${svc.namespace}/${svc.name}`;
-    f.ns.value = svc.namespace;
-    f.name.value = svc.name;
-    f.name.disabled = true;
-    f.version.value = svc.version || '';
-    f.owner.value = svc.owner || '';
-    f.health.value = svc.healthPath || '';
-    f.desc.value = svc.description || '';
-    f.repo.value = svc.gitRepoUrl || '';
-    f.dept.value = svcDeptKey(svc);
-    f.tags.value = (svc.tags || []).join(',');
-    f.docs.value = (svc.api && svc.api.docsUrl) || '';
-    f.specurl.value = (svc.api && svc.api.specUrl) || '';
-    f.spec.value = '';
-    if (svc.api && svc.api.hasSpec) {
-      const raw = await fetchText(`/v1/namespaces/${encodeURIComponent(svc.namespace)}/services/${encodeURIComponent(svc.name)}/spec`);
-      f.spec.value = raw;
-      setApiMode('spec');
-    } else {
-      setEpRows(svc.api ? svc.api.endpoints : []);
-      setApiMode('manual');
-    }
-  } else {
-    $('#svc-form-title').textContent = '登记服务契约';
-    f.name.disabled = false;
-    ['name', 'version', 'owner', 'health', 'desc', 'tags', 'docs', 'repo', 'specurl', 'spec'].forEach((k) => { f[k].value = ''; });
-    f.dept.value = '';
-    setEpRows(null);
-    setApiMode('spec');
-    prefillSpecTemplate(true); // 预填最小模板：不粘贴 spec 也能直接提交成功
-  }
-  setHint($('#svc-form-hint'), '');
-  show($('#svc-form-card'), true);
-  show($('#inst-form-card'), false);
-  show($('#inst-batch-card'), false);
-}
-
-async function submitServiceForm() {
-  const card = $('#svc-form-card');
-  const hint = $('#svc-form-hint');
-  clearFieldErrors(card);
-
-  const nsEl = $('#svc-form-ns');
-  const nameEl = $('#svc-form-name');
-  const specEl = $('#svc-form-spec');
-  const ns = nsEl.value;
-  const name = nameEl.value.trim();
-
-  // 校验失败一律 formFail：红色常驻提示 + toast + 标红并聚焦出错字段。
-  if (!ns) {
-    formFail(hint, '请选择命名空间（下拉为空说明还没有命名空间，先去「命名空间」页签新建一个）', nsEl);
-    return;
-  }
-  if (!name) {
-    formFail(hint, '服务名必填（小写字母/数字/._-，例如 event-center）', nameEl);
-    return;
-  }
-  if (!/^[a-z0-9]([a-z0-9._-]{0,61}[a-z0-9])?$/.test(name)) {
-    formFail(hint, '服务名不合法：只能用小写字母/数字/._-，且以字母或数字开头结尾（≤63 字符）', nameEl);
-    return;
-  }
-
-  const apiPart = { protocols: ['http'] };
-  const docs = $('#svc-form-docs').value.trim();
-  const specurl = $('#svc-form-specurl').value.trim();
-  if (docs) apiPart.docsUrl = docs;
-  if (specurl) apiPart.specUrl = specurl;
-
-  // 代码仓库地址：本地先拦一道，错误直接指到字段（服务端也会校验，规则一致）。
-  const repoEl = $('#svc-form-repo');
-  const repo = repoEl.value.trim();
-  if (repo && !/^[A-Za-z][A-Za-z0-9+.-]*:\/\/\S+$/.test(repo) && !/^[^\s@/]+@[^\s:/]+:\S+$/.test(repo)) {
-    formFail(hint, 'gitRepoUrl 不合法：要仓库地址，例如 https://github.com/org/repo.git、' +
-      'ssh://git@host/org/repo.git 或 git@host:org/repo.git（本中心只存不克隆）', repoEl);
-    return;
-  }
-
-  if ($('#svc-form-mode').value === 'spec') {
-    const spec = specEl.value;
-    if (!spec.trim()) {
-      formFail(hint, 'API 原文为空：粘贴 OpenAPI（YAML/JSON），或点「预填最小模板」，或切到「手工声明端点」', specEl);
-      return;
-    }
-    apiPart.spec = spec;
-  } else {
-    const eps = [];
-    for (const tr of [...document.querySelectorAll('#svc-form-eps tbody tr')]) {
-      const pathEl = tr.querySelector('.ep-path');
-      const path = pathEl.value.trim();
-      if (!path) continue; // 空行忽略
-      if (!path.startsWith('/')) {
-        formFail(hint, '端点路径必须以 / 开头，当前是：' + path, pathEl);
-        return;
-      }
-      eps.push({
-        method: tr.querySelector('.ep-method').value,
-        path,
-        summary: tr.querySelector('.ep-summary').value.trim(),
-      });
-    }
-    if (!eps.length) {
-      formFail(hint, '至少声明一个端点：点「＋ 加一行」，填上 method 与 path（如 GET /health）');
-      return;
-    }
-    apiPart.endpoints = eps;
-  }
-
-  const healthEl = $('#svc-form-health');
-  const health = healthEl.value.trim();
-  if (health && !health.startsWith('/')) {
-    formFail(hint, 'healthPath 必须以 / 开头（它是元信息，供消费方/看门狗自行探活）：' + health, healthEl);
-    return;
-  }
-
-  const body = {
-    version: $('#svc-form-version').value.trim(),
-    owner: $('#svc-form-owner').value.trim(),
-    description: $('#svc-form-desc').value.trim(),
-    healthPath: health,
-    api: apiPart,
-  };
-  if (repo) body.gitRepoUrl = repo;
-  // 归属部门：只发下拉选中的那个（选中项就是权威值 —— 组织接口给的 ID/名称）。
-  // 不选 = 不带该字段，PUT 是整份覆盖，等于把部门清掉（与 gitRepoUrl 的语义一致）。
-  const deptSel = deptByKey($('#svc-form-dept').value);
-  if (deptSel && deptSel.id) body.departmentId = deptSel.id;
-  if (deptSel && deptSel.name) body.departmentName = deptSel.name;
-  const tags = parseList($('#svc-form-tags').value);
-  if (tags.length) body.tags = tags;
-
-  await withBusy($('#svc-form-submit'), '提交中…', async () => {
-    const res = await api(
-      `/v1/namespaces/${encodeURIComponent(ns)}/services/${encodeURIComponent(name)}`,
-      { method: 'PUT', body });
-    if (!res.ok) {
-      formFail(hint, '登记失败：' + errText(res.data));
-      return;
-    }
-    const endpoints = (res.data.service.api.endpoints || []).length;
-    setHint(hint, '');
-    toast(`已${res.data.created ? '登记' : '更新'} ${ns}/${name}（${endpoints} 个端点）`);
-    // 部门对齐的结果（"已按组织接口对齐" / "组织接口不可达，按声明值保存"）必须可见，
-    // 否则用户填了部门却不知道到底有没有对上。
-    if (res.data.departmentNote) toast(res.data.departmentNote);
-    show(card, false);
-    renderServices();
-  });
-}
-
 // ---- 面板写入口：新增实例 / 声明式批量同步 ----
 function currentService() {
   const sel = $('#inst-service').value;
@@ -1320,7 +878,6 @@ function currentService() {
 function openInstanceForm() {
   const target = currentService();
   if (!target) return;
-  show($('#svc-form-card'), false);
   show($('#inst-batch-card'), false);
   $('#inst-form-title').textContent = `新增实例 → ${target.ns}/${target.svc}`;
   $('#inst-form-scheme').value = 'http';
@@ -1364,7 +921,6 @@ async function submitInstanceForm() {
 function openBatchForm() {
   const target = currentService();
   if (!target) return;
-  show($('#svc-form-card'), false);
   show($('#inst-form-card'), false);
   setHint($('#inst-batch-hint'), '');
   show($('#inst-batch-card'), true);
@@ -1427,24 +983,9 @@ $('#api-path').addEventListener('keydown', (e) => { if (e.key === 'Enter') rende
 $('#api-dept').addEventListener('change', renderSearch);
 $('#inst-refresh').addEventListener('click', renderInstances);
 $('#inst-service').addEventListener('change', renderInstances);
-$('#svc-new').addEventListener('click', () => openServiceForm(null));
-$('#svc-form-cancel').addEventListener('click', () => show($('#svc-form-card'), false));
-$('#svc-form-submit').addEventListener('click', submitServiceForm);
-$('#svc-form-ep-add').addEventListener('click', () => $('#svc-form-eps tbody').appendChild(epRow(null)));
-$('#svc-form-mode').addEventListener('change', (e) => setApiMode(e.target.value));
-$('#svc-form-spec-template').addEventListener('click', () => prefillSpecTemplate(true));
-$('#svc-form-name').addEventListener('input', () => prefillSpecTemplate(false));
-// 「重新同步部门」：强制跳过服务端 TTL 缓存重取组织接口的目录（组织服务刚建了新部门时用）。
-$('#svc-form-dept-refresh').addEventListener('click', async (e) => {
-  const btn = e.target;
-  await withBusy(btn, '同步中…', async () => {
-    const cat = await loadDepartments(true);
-    fillDeptSelects(lastServices);
-    renderDeptNote();
-    if (cat.enabled && cat.available) toast(`已从组织接口同步 ${(cat.departments || []).length} 个部门`);
-    else toast('部门目录暂时取不到：' + (cat.error || '组织接口不可达'), true);
-  });
-});
+// 登记 / 编辑契约在独立页面（contract.html）里做，面板这边只是两个链接：
+// #svc-new（工具条）与每张卡片上的「编辑契约」；不用 JS 接管点击，
+// 保留新页签/新窗口/复制链接地址这些浏览器原生能力。
 $('#inst-new').addEventListener('click', openInstanceForm);
 $('#inst-form-cancel').addEventListener('click', () => show($('#inst-form-card'), false));
 $('#inst-form-submit').addEventListener('click', submitInstanceForm);

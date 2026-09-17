@@ -14,7 +14,10 @@ import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const appJS = fs.readFileSync(path.join(here, 'app.js'), 'utf8');
+const readScript = (name) => fs.readFileSync(path.join(here, name), 'utf8');
+// 面板（index.html）与契约编辑页（contract.html）各自加载 shared.js + 自己的脚本。
+const PANEL_SCRIPTS = ['shared.js', 'app.js'];
+const CONTRACT_SCRIPTS = ['shared.js', 'contract.js'];
 
 const failures = [];
 function check(cond, what) {
@@ -27,7 +30,7 @@ function check(cond, what) {
 }
 
 // ---- 受控 DOM ----
-function buildDom(scenario = {}) {
+function buildDom(scenario = {}, scripts = PANEL_SCRIPTS) {
   const handlers = new Map();
   const els = new Map();
   const requests = [];
@@ -89,9 +92,17 @@ function buildDom(scenario = {}) {
       querySelectorAll: () => [],
       createElement: (tag) => makeEl('<' + tag + '>'),
       addEventListener() {},
+      // 主题开关会读写 <html data-theme>（真实 DOM 里就是 documentElement）
+      documentElement: { setAttribute() {}, getAttribute: () => 'dark' },
     },
     localStorage: { getItem: () => '', setItem() {}, removeItem() {} },
-    location: { origin: 'http://127.0.0.1:4240' },
+    location: {
+      origin: 'http://127.0.0.1:4240',
+      pathname: '/panel/contract.html',
+      search: scenario.search || '',
+      hash: scenario.hash || '',
+    },
+    URLSearchParams,
     setInterval: () => 1,
     clearInterval() {},
     setTimeout: (fn, d) => setTimeout(fn, d),
@@ -100,19 +111,31 @@ function buildDom(scenario = {}) {
     confirm: () => true,
     alert() {},
     addEventListener(ev, fn) { windowEvents.push({ ev, fn }); },
+    // 内联 spec 原文（编辑时取回），由下面的 fetch mock 按路径动态返回
     fetch: (p, init) => {
       const method = (init && init.method) || 'GET';
       requests.push({ method, path: String(p), body: init && init.body });
       const base = String(p).split('?')[0];
+      const okText = (text) => Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(text) });
+      const okJSON = (obj) => okText(JSON.stringify(obj));
       const get = getResponses[base];
       if (method === 'GET' && get) {
-        return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify(get.body)) });
+        return okText(get.raw !== undefined ? get.raw : JSON.stringify(get.body));
+      }
+      // 契约编辑页：读单个契约（编辑模式回填）
+      const hit = base.match(/^\/v1\/namespaces\/([^/]+)\/services\/([^/]+)(\/spec)?$/);
+      if (method === 'GET' && hit) {
+        if (hit[3]) return okText(scenario.spec !== undefined ? scenario.spec : 'openapi: 3.0.3\n');
+        const svc = scenario.service
+          || (scenario.services || []).find((s) => s.name === decodeURIComponent(hit[2]))
+          || EVENT_CENTER;
+        return okJSON({ service: svc });
       }
       if (scenario.serverError) {
         const body = { error: { code: 'invalid_request', message: '服务端说：host 不合法' } };
         return Promise.resolve({ ok: false, status: 400, text: () => Promise.resolve(JSON.stringify(body)) });
       }
-      const body = { created: true, service: { api: { endpoints: [{ method: 'GET', path: '/health' }] } } };
+      const body = { created: true, service: { api: { hasSpec: true, endpoints: [{ method: 'GET', path: '/health' }] } } };
       return Promise.resolve({ ok: true, status: 201, text: () => Promise.resolve(JSON.stringify(body)) });
     },
     JSON, Date, Math, Number, String, Object, Array, Promise, Error,
@@ -122,7 +145,9 @@ function buildDom(scenario = {}) {
   sandbox.globalThis = sandbox;
 
   vm.createContext(sandbox);
-  vm.runInContext(appJS, sandbox, { filename: 'app.js' });
+  for (const name of scripts) {
+    vm.runInContext(readScript(name), sandbox, { filename: name });
+  }
   return {
     sandbox, q, handlers, requests, windowEvents,
     // 模拟"别的平台登记/下线了服务"：改完之后面板读到的是新数据。
@@ -142,6 +167,29 @@ function collectCards(node, out = []) {
   if (node.className === 'item') out.push(node);
   (node.children || []).forEach((c) => collectCards(c, out));
   return out;
+}
+
+// 按 createElement 的标签收集节点（卡片上的按钮/链接是造出来的，不在 innerHTML 里）。
+function collectByKey(node, key, out = []) {
+  if (node._key === key) out.push(node);
+  (node.children || []).forEach((c) => collectByKey(c, key, out));
+  return out;
+}
+
+// 面板上的入口必须是"独立页面"的链接 —— 本轮需求的固化点。
+async function scenarioPanelLinksToContractPage() {
+  console.log('\n场景：面板里的「编辑契约」指向独立页面');
+  const dom = buildDom({ services: [EVENT_CENTER] });
+  await click(dom, '#svc-refresh');
+  const card = collectCards(dom.q('#svc-list'))[0];
+  const links = collectByKey(card, '<a>');
+  const edit = links.find((a) => String(a.textContent).includes('编辑契约'));
+  check(!!edit, '服务卡片上有「编辑契约」入口');
+  check(!!edit && edit.href === 'contract.html?ns=default&name=event-center',
+    '它是链接，指向独立页面（带 ns/name，可收藏可分享）：' + (edit && edit.href));
+  check(!!edit && edit.target === '_blank', '在新页签打开（面板的展开状态与滚动位置不受影响）');
+  check(dom.handlers.get('#svc-form-submit|click') === undefined,
+    '面板里没有内联的契约表单提交（已挪到 contract.html）');
 }
 
 // ---- 服务树的断言辅助：树节点是 createElement 造出来的，不走 q(sel) ----
@@ -195,6 +243,18 @@ async function click(dom, sel) {
   return fns.length;
 }
 
+// 等一宏任务：把 initContractPage() 的微任务链（命名空间→部门→契约）跑完。
+const settle = () => new Promise((r) => setTimeout(r, 0));
+
+// 打开契约编辑页（contract.html 的真实初始状态：正文与"已保存"卡片都带 hidden）。
+async function buildContractDom(scenario = {}) {
+  const dom = buildDom(scenario, CONTRACT_SCRIPTS);
+  dom.q('#contract-body').hidden = true;
+  dom.q('#contract-done').hidden = true;
+  await settle();
+  return dom;
+}
+
 // 填一份"完整"的表单，再按场景做破坏。
 function fillServiceForm(dom, over = {}) {
   dom.q('#svc-form-ns').value = 'default';
@@ -206,20 +266,64 @@ function fillServiceForm(dom, over = {}) {
 }
 
 // ---- 场景 ----
-async function scenarioFormOpensWithTemplate() {
-  console.log('\n场景：点「＋ 登记服务契约」');
-  const dom = buildDom();
-  const n = await click(dom, '#svc-new');
-  await new Promise((r) => setTimeout(r, 0));
-  check(n === 1, '“登记服务契约”按钮注册了 click 处理器');
-  check(dom.q('#svc-form-card').hidden === false, '表单已展开');
+// 契约编辑页是**独立页面**（本轮需求）：打开它 = 打开表单，不再有"点按钮弹内联表单"这一步。
+async function scenarioContractPageNew() {
+  console.log('\n场景：契约编辑页（独立页面 /panel/contract.html）打开即可用');
+  const dom = await buildContractDom();
+  check(dom.q('#contract-body').hidden === false, '页面正文展开（不是列表里的内联表单）');
+  check(String(dom.q('#svc-form-title').textContent).includes('登记服务契约'),
+    '标题是登记：' + JSON.stringify(dom.q('#svc-form-title').textContent));
+  check(dom.q('#svc-form-mode').value === 'spec', '默认走「粘贴 OpenAPI」');
   check(dom.q('#svc-form-spec').value.includes('openapi: 3.0.3'), 'API 原文已预填最小模板（不粘贴 spec 也能提交成功）');
   check(dom.q('#svc-form-repo').value === '', '新登记时代码仓库输入框是空的（这个字段可选）');
+  check(dom.q('#svc-form-name').disabled !== true, '新登记时服务名可填');
 }
+
+async function scenarioContractEditFromURL() {
+  console.log('\n场景：编辑模式（URL 带 ns/name）把契约回填进表单');
+  const svc = {
+    ...EVENT_CENTER, version: '9.9.9', owner: 'kaulie', healthPath: '/health',
+    description: '事件中心', tags: ['events', 'pubsub'],
+    gitRepoUrl: 'https://github.com/kaulie/event-center.git',
+    departmentId: 'D0001', departmentName: 'SRE部门',
+    api: {
+      ...EVENT_CENTER.api,
+      docsUrl: 'https://docs.example.com/event-center', specUrl: 'https://x/openapi.yaml',
+    },
+  };
+  const dom = await buildContractDom({
+    search: '?ns=default&name=event-center', service: svc, spec: 'openapi: 3.0.3\ninfo:\n  title: event-center\n',
+  });
+  check(String(dom.q('#svc-form-title').textContent).includes('编辑服务契约 default/event-center'),
+    '标题点名在编辑哪个契约：' + JSON.stringify(dom.q('#svc-form-title').textContent));
+  check(dom.q('#svc-form-name').value === 'event-center' && dom.q('#svc-form-name').disabled === true,
+    '服务名回填并锁定（它是身份，不能改）');
+  check(dom.q('#svc-form-version').value === '9.9.9', '版本回填：' + JSON.stringify(dom.q('#svc-form-version').value));
+  check(dom.q('#svc-form-owner').value === 'kaulie', 'owner 回填');
+  check(dom.q('#svc-form-tags').value === 'events,pubsub', '标签回填');
+  check(dom.q('#svc-form-repo').value === 'https://github.com/kaulie/event-center.git', '代码仓库回填');
+  check(dom.q('#svc-form-dept').value === 'id:D0001', '归属部门回填（key 用组织接口的 ID）');
+  check(dom.q('#svc-form-docs').value === 'https://docs.example.com/event-center', '文档链接回填');
+  check(dom.q('#svc-form-spec').value.includes('title: event-center'), '内联 OpenAPI 原文取回来了');
+  check(dom.q('#contract-body').hidden === false, '编辑模式同样直接可用');
+
+  // 只改一个字段提交：PUT 打在 URL 里的那个契约上
+  dom.q('#svc-form-version').value = '10.0.0';
+  await click(dom, '#svc-form-submit');
+  const puts = dom.requests.filter((r) => r.method === 'PUT');
+  check(puts.length === 1 && puts[0].path === '/v1/namespaces/default/services/event-center',
+    'PUT 打在 URL 里的那个契约上：' + (puts[0] ? puts[0].path : '(无)'));
+  const body = puts[0] ? JSON.parse(puts[0].body) : {};
+  check(body.version === '10.0.0', '改动的版本进了请求体');
+  check(body.departmentId === 'D0001' && body.departmentName === 'SRE部门',
+    '部门照旧带上（不会因为"没重新选"被清掉）');
+  check(body.api.spec.includes('title: event-center'), '内联 spec 原文原样带回（编辑不会把 spec 弄丢）');
+}
+
 
 async function scenarioInvalidGitRepoURL() {
   console.log('\n场景：代码仓库地址写成了简写/本地路径');
-  const dom = buildDom();
+  const dom = await buildContractDom();
   fillServiceForm(dom, { '#svc-form-repo': 'github.com/kaulie/my-service' });
   await click(dom, '#svc-form-submit');
   const hint = dom.q('#svc-form-hint');
@@ -228,7 +332,7 @@ async function scenarioInvalidGitRepoURL() {
   check(dom.requests.filter((r) => r.method === 'PUT').length === 0, '本地就拦住了，不发请求');
 
   // scp 风格（git remote -v 直接抄）要放行
-  const ok = buildDom();
+  const ok = await buildContractDom();
   fillServiceForm(ok, { '#svc-form-repo': 'git@github.com:kaulie/my-service.git' });
   await click(ok, '#svc-form-submit');
   const puts = ok.requests.filter((r) => r.method === 'PUT');
@@ -239,22 +343,22 @@ async function scenarioInvalidGitRepoURL() {
 
 async function scenarioSubmitWithoutSpec() {
   console.log('\n场景：填了名字但没填 OpenAPI 原文（最容易遇到的坑）');
-  const dom = buildDom();
+  const dom = await buildContractDom();
   fillServiceForm(dom, { '#svc-form-spec': '   ' });
   const n = await click(dom, '#svc-form-submit');
   const hint = dom.q('#svc-form-hint');
-  check(n === 1, '提交按钮注册了 click 处理器（否则就是“点了没反应”）');
+  check(n === 1, '提交按钮注册了 click 处理器（否则就是"点了没反应"）');
   check(!!hint.textContent, 'hint 有可见文案：' + JSON.stringify(hint.textContent));
   check(hint.className.includes('hint--error'), 'hint 用醒目错误样式（不再是不起眼的小灰字）');
   check(!!dom.q('#toast').textContent, '同时弹 toast（表单不在视口也能看到）：' + JSON.stringify(dom.q('#toast').textContent));
   check(dom.q('#svc-form-spec')._errors.includes('field-error'), '出错字段被标红（spec 文本框）');
-  check(dom.q('#svc-form-card').hidden === false, '失败时保留表单内容，不关闭');
+  check(dom.q('#contract-done').hidden === true, '失败时不显示"已保存"卡片，表单内容不丢');
   check(dom.requests.filter((r) => r.method === 'PUT').length === 0, '本地就拦住了，不发请求');
 }
 
 async function scenarioInvalidName() {
   console.log('\n场景：服务名非法（大写/下划线）');
-  const dom = buildDom();
+  const dom = await buildContractDom();
   fillServiceForm(dom, { '#svc-form-name': 'Bad_Name' });
   await click(dom, '#svc-form-submit');
   const hint = dom.q('#svc-form-hint');
@@ -264,26 +368,32 @@ async function scenarioInvalidName() {
 
 async function scenarioSuccess() {
   console.log('\n场景：填齐并提交成功');
-  const dom = buildDom();
+  const dom = await buildContractDom();
   fillServiceForm(dom);
   await click(dom, '#svc-form-submit');
   const puts = dom.requests.filter((r) => r.method === 'PUT');
   check(puts.length === 1 && puts[0].path.includes('/v1/namespaces/default/services/my-service'),
     '发出正确请求：' + (puts[0] ? puts[0].path : '(无)'));
   check(String(dom.q('#toast').textContent).includes('已登记'), 'toast 明确告知成功：' + JSON.stringify(dom.q('#toast').textContent));
-  check(dom.q('#svc-form-card').hidden === true, '成功后关闭表单');
-  check(dom.q('#svc-form-hint').textContent === '', '成功时清空错误提示');
+  check(String(dom.q('#svc-form-hint').textContent).includes('已登记')
+    && dom.q('#svc-form-hint').className.includes('hint--ok'),
+    '页面内也留下成功提示（不是一闪而过的 toast）');
+  check(dom.q('#contract-done').hidden === false, '出现"已保存"卡片');
+  check(String(dom.q('#contract-done-text').textContent).includes('default/my-service'),
+    '卡片写明存了哪个契约：' + JSON.stringify(dom.q('#contract-done-text').textContent));
+  check(String(dom.q('#contract-done-spec').href).includes('/v1/namespaces/default/services/my-service/spec'),
+    '"查看内联 spec"指向刚存的契约：' + JSON.stringify(dom.q('#contract-done-spec').href));
 }
 
 async function scenarioServerError() {
   console.log('\n场景：服务端返回 400');
-  const dom = buildDom({ serverError: true });
+  const dom = await buildContractDom({ serverError: true });
   fillServiceForm(dom);
   await click(dom, '#svc-form-submit');
   const hint = dom.q('#svc-form-hint').textContent;
   check(String(hint).includes('服务端说：host 不合法'), 'hint 原样展示服务端原因：' + JSON.stringify(hint));
   check(String(dom.q('#toast').textContent).includes('服务端说：host 不合法'), 'toast 也展示服务端原因');
-  check(dom.q('#svc-form-card').hidden === false, '失败时不关闭表单，内容不丢');
+  check(dom.q('#contract-done').hidden === true, '失败时不显示"已保存"卡片，内容不丢');
 }
 
 async function scenarioInstanceForm() {
@@ -354,9 +464,7 @@ async function fire(dom, sel, ev) {
 
 async function scenarioDepartmentFromOrg() {
   console.log('\n场景：归属部门的候选来自组织接口（登记时对齐）');
-  const dom = buildDom();
-  await click(dom, '#svc-new');
-  await new Promise((r) => setTimeout(r, 0));
+  const dom = await buildContractDom();
   check(dom.q('#svc-form-dept').innerHTML.includes('SRE部门（D0001）'),
     '表单部门下拉是组织接口给的目录：' + JSON.stringify(dom.q('#svc-form-dept').innerHTML));
   check(String(dom.q('#svc-form-dept-note').textContent).includes('已从组织接口同步 2 个部门'),
@@ -377,17 +485,18 @@ async function scenarioDepartmentOffline() {
     error: '请求组织接口失败：connection refused',
   };
   const svc = { ...EVENT_CENTER, departmentId: 'D0009', departmentName: '已下线部门' };
-  const dom = buildDom({ deptCatalog: down, services: [svc] });
-  await click(dom, '#svc-refresh');
-  const card = collectCards(dom.q('#svc-list'))[0];
+  const panel = buildDom({ deptCatalog: down, services: [svc] });
+  await click(panel, '#svc-refresh');
+  const card = collectCards(panel.q('#svc-list'))[0];
   check(!!card && card.innerHTML.includes('部门:已下线部门'),
     '卡片照常显示部门（stale 的声明值也留着）');
   check(!!card && card.innerHTML.includes('title="归属部门：已下线部门（D0009）'),
     '部门标签的 title 里带 ID（悬停能看到权威标识）');
 
-  await click(dom, '#svc-new');
+  // 契约编辑页：目录不可达也要能编辑（下拉里保留契约上实际用到的部门）
+  const dom = await buildContractDom({ deptCatalog: down, services: [svc], search: '?ns=default&name=event-center' });
   check(String(dom.q('#svc-form-dept-note').textContent).includes('组织接口暂时不可达'),
-    '表单明确说明目录为什么是旧的：' + JSON.stringify(dom.q('#svc-form-dept-note').textContent));
+    '编辑页明确说明目录为什么是旧的：' + JSON.stringify(dom.q('#svc-form-dept-note').textContent));
   check(dom.q('#svc-form-dept').innerHTML.includes('已下线部门（D0009）'),
     '服务上实际用到的部门仍在候选里（编辑时不会被静默清掉）');
 }
@@ -638,7 +747,9 @@ async function scenarioServiceTreeFilter() {
 
 console.log('面板冒烟测试（web/panel-smoke.mjs）');
 for (const s of [
-  scenarioFormOpensWithTemplate,
+  scenarioContractPageNew,
+  scenarioContractEditFromURL,
+  scenarioPanelLinksToContractPage,
   scenarioSubmitWithoutSpec,
   scenarioInvalidName,
   scenarioInvalidGitRepoURL,

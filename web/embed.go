@@ -6,7 +6,11 @@ package web
 
 import "embed"
 
-// Assets 是面板静态资源（由 internal/api 在 /panel/ 下托管）。
+// Assets 是面板静态资源（由 internal/api 在 /panel/ 下托管）：
 //
-//go:embed index.html styles.css app.js
+//	index.html + app.js          —— 控制面板
+//	contract.html + contract.js  —— 契约编辑页（独立页面）
+//	shared.js                    —— 两页共用的工具（令牌/API/toast/部门/表单反馈）
+//
+//go:embed index.html styles.css shared.js app.js contract.html contract.js
 var Assets embed.FS

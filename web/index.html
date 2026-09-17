@@ -22,6 +22,7 @@
       <label class="autorefresh">
         <input type="checkbox" id="autorefresh" checked /> 自动刷新
       </label>
+      <button class="btn btn--small" id="theme-toggle" type="button" title="切换主题">☀</button>
       <label class="token">
         令牌
         <input type="password" id="token" placeholder="写操作需要（admin / namespace token）" autocomplete="off" />
@@ -53,69 +54,14 @@
     <!-- 服务目录 -->
     <section id="tab-services" class="tabpanel">
       <div class="actions">
-        <button class="btn btn--primary" id="svc-new">＋ 登记服务契约</button>
+        <!-- 登记/编辑契约在**独立页面**（contract.html）打开：OpenAPI 原文要一大片地方，
+             内联在列表上方时列表一长就"点了不知道弹出在哪"。新页签打开，面板的滚动位置不受影响。 -->
+        <a class="btn btn--primary" id="svc-new" href="contract.html" target="_blank" rel="noopener"
+           title="在新页签打开契约编辑页（登记新服务）">＋ 登记服务契约 ↗</a>
         <input type="search" id="svc-filter" placeholder="过滤：名字 / 描述 / owner / version / 仓库 / 部门" />
         <select id="svc-tag-filter"><option value="">全部标签</option></select>
         <select id="svc-dept-filter" title="按归属部门过滤（部门数据来自组织接口）"><option value="">全部部门</option></select>
         <button class="btn" id="svc-refresh">刷新</button>
-      </div>
-
-      <div class="form-card" id="svc-form-card" hidden>
-        <h2 id="svc-form-title">登记服务契约</h2>
-        <div class="form-row">
-          <label>命名空间 <select id="svc-form-ns"></select></label>
-          <label>服务名 <input type="text" id="svc-form-name" placeholder="event-center" /></label>
-          <label>版本 <input type="text" id="svc-form-version" placeholder="1.4.2" /></label>
-          <label>owner <input type="text" id="svc-form-owner" placeholder="kaulie" /></label>
-          <label>healthPath <input type="text" id="svc-form-health" placeholder="/health" /></label>
-        </div>
-        <div class="form-row">
-          <label class="grow">描述 <input type="text" id="svc-form-desc" placeholder="一句话说明这个服务是干什么的" /></label>
-          <label class="grow">标签（逗号分隔） <input type="text" id="svc-form-tags" placeholder="events,pubsub" /></label>
-          <label class="grow">文档链接 <input type="text" id="svc-form-docs" placeholder="https://…" /></label>
-          <label class="grow">代码仓库 gitRepoUrl <input type="text" id="svc-form-repo" placeholder="https://github.com/org/repo.git 或 git@host:org/repo.git" /></label>
-        </div>
-        <div class="form-row">
-          <label>归属部门
-            <select id="svc-form-dept" title="候选来自组织架构服务；组织接口不可达时按声明值保存"></select>
-          </label>
-          <button class="btn btn--small" id="svc-form-dept-refresh" type="button">重新同步部门</button>
-          <span class="note grow" id="svc-form-dept-note"></span>
-        </div>
-        <div class="form-row">
-          <label>API 来源
-            <select id="svc-form-mode">
-              <option value="spec">粘贴 OpenAPI（推荐，自动解析端点）</option>
-              <option value="manual">手工声明端点</option>
-            </select>
-          </label>
-          <label class="grow">外部 spec 链接（可选，只存不抓取） <input type="text" id="svc-form-specurl" placeholder="https://…/openapi.yaml" /></label>
-        </div>
-
-        <div id="svc-form-spec-wrap">
-          <label class="stack">OpenAPI 3.x / Swagger 2.0 原文（YAML 或 JSON）
-            <textarea id="svc-form-spec" rows="10" spellcheck="false"
-              placeholder="openapi: 3.0.3&#10;info:&#10;  title: event-center&#10;  version: 0.1.0&#10;paths:&#10;  /health:&#10;    get:&#10;      summary: 健康检查"></textarea>
-          </label>
-          <div class="actions" style="margin:6px 0">
-            <button class="btn btn--small" id="svc-form-spec-template" type="button">预填最小模板</button>
-            <span class="note">服务端会解析出端点索引并存 sha256；原文随时可从「下载 OpenAPI」取回。</span>
-          </div>
-        </div>
-
-        <div id="svc-form-manual-wrap" hidden>
-          <table id="svc-form-eps">
-            <thead><tr><th style="width:110px">方法</th><th>路径</th><th>说明</th><th style="width:60px"></th></tr></thead>
-            <tbody></tbody>
-          </table>
-          <button class="btn btn--small" id="svc-form-ep-add" type="button">＋ 加一行</button>
-        </div>
-
-        <div class="actions" style="margin-top:12px">
-          <button class="btn btn--primary" id="svc-form-submit" type="button">提交</button>
-          <button class="btn" id="svc-form-cancel" type="button">取消</button>
-          <span class="hint" id="svc-form-hint"></span>
-        </div>
       </div>
 
       <div id="svc-list" class="list"></div>
@@ -242,6 +188,7 @@
   </main>
 
   <div id="toast" class="toast" hidden></div>
+  <script src="shared.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
