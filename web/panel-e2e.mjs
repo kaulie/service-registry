@@ -36,6 +36,11 @@ function makeEl(key) {
       const k = key + '|' + ev;
       if (!handlers.has(k)) handlers.set(k, []);
       handlers.get(k).push(fn);
+      // 服务树的行是 createElement 造出来的（所有 <div> 共用一个 key），
+      // 要"只点某一行"就得能从元素本身拿到它的处理器。
+      if (!el._handlers) el._handlers = {};
+      if (!el._handlers[ev]) el._handlers[ev] = [];
+      el._handlers[ev].push(fn);
     },
     appendChild(c) { el.children.push(c); return c; },
     remove() {},
@@ -101,6 +106,24 @@ const toggle = async (details, open) => {
   }
 };
 
+// 服务树的节点：class 里带 tree__node 的 div（树是 createElement 造的，不走 q(sel)）。
+const isTreeNode = (n) => String(n.className || '').split(' ').includes('tree__node');
+const treeNodes = (node, out = []) => {
+  if (isTreeNode(node)) out.push(node);
+  (node.children || []).forEach((c) => treeNodes(c, out));
+  return out;
+};
+const treeTop = (root) => (root.children || []).filter(isTreeNode);
+const treeRow = (n) => n.children[0];
+const treeKids = (n) => n.children[1];
+const treeLabel = (n) => treeRow(n).children[1].textContent;
+const treeIsOpen = (n) => treeKids(n).hidden === false;
+const fireOn = async (el, ev) => {
+  const fns = (el._handlers && el._handlers[ev]) || [];
+  for (const fn of fns) { const r = fn({ target: el }); if (r && r.then) await r; }
+  return fns.length;
+};
+
 const services = (await (await fetch(BASE + '/v1/services')).json()).services;
 console.log('\n真实数据：' + services.map((s) => s.namespace + '/' + s.name).join(', '));
 
@@ -125,6 +148,44 @@ const after = findAll(q('#svc-list'), '<details>');
 check(after.length === services.length, '刷新后卡片没有重复堆积（' + after.length + '）');
 check(after[0] === first, '复用同一个节点（没重建、不闪、不丢滚动位置）');
 check(after[0].open === true, '自动刷新后依然是展开的 ← 本次修复点');
+
+// ---- 服务树：真实数据 + 真实面板资源 ----
+console.log('\n场景：服务树 —— 默认收起、点开只动一枝、自动刷新不丢展开状态');
+if (!(await click('#tree-refresh'))) {
+  console.log('   跳过：这份面板还没有「服务树」页签（旧版本）');
+} else {
+  const root = q('#tree-root');
+  const top = treeTop(root);
+  check(top.length > 0, `树上至少有一枝（部门 / 未归属部门）（${top.length}）`);
+  check(top.every((n) => !treeIsOpen(n)), '默认全部收起');
+  console.log('   工具条：' + JSON.stringify(q('#tree-note').textContent));
+  console.log('   顶级枝：' + top.map(treeLabel).join(' | '));
+
+  // 每个登记过的服务都必须在树上找得到（服务的标签就是 namespace/name）
+  const labels = treeNodes(root).map(treeLabel);
+  const missing = services.filter((s) => !labels.includes(s.namespace + '/' + s.name));
+  check(missing.length === 0, '每个服务都出现在树上'
+    + (missing.length ? '（缺 ' + missing.map((s) => s.namespace + '/' + s.name).join(', ') + '）' : ''));
+  if (services.some((s) => !s.departmentId && !s.departmentName)) {
+    check(treeLabel(top[top.length - 1]) === '未归属部门', '没填部门的服务收在最后一枝「未归属部门」里');
+  }
+
+  const first = top[0];
+  check(await fireOn(treeRow(first), 'click') === 1, '点这一行能开合');
+  check(treeIsOpen(first), '被点的那枝展开了');
+  check(top.slice(1).every((n) => !treeIsOpen(n)), '其它枝不受影响（仍是收起的）');
+  await fireOn(treeRow(first), 'click');
+  check(!treeIsOpen(first), '再点一次收起');
+
+  await fireOn(treeRow(first), 'click');
+  await click('#tree-refresh'); // 等价于 3 秒后的自动刷新
+  check(treeTop(root)[0] === first && treeIsOpen(first), '自动刷新后还是同一批节点、且保持展开');
+
+  await click('#tree-expand-all');
+  check(treeNodes(root).every(treeIsOpen), '「全部展开」展开整棵树');
+  await click('#tree-collapse-all');
+  check(treeNodes(root).every((n) => !treeIsOpen(n)), '「全部收起」收起整棵树');
+}
 
 if (WRITE) {
   // 每次跑用一个新名字：写操作要能被重复执行（否则第二次跑"数据没变"就测不到重建路径了）。

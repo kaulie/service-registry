@@ -48,6 +48,11 @@ function buildDom(scenario = {}) {
         const k = key + '|' + ev;
         if (!handlers.has(k)) handlers.set(k, []);
         handlers.get(k).push(fn);
+        // 也按元素记一份：服务树的行是 createElement 造出来的（所有 <div> 共用一个 key），
+        // 测试要能"只点某一行"，就得能从元素本身拿到它的处理器。
+        if (!el._handlers) el._handlers = {};
+        if (!el._handlers[ev]) el._handlers[ev] = [];
+        el._handlers[ev].push(fn);
       },
       appendChild(c) { el.children.push(c); return c; },
       remove() {},
@@ -138,6 +143,38 @@ function collectCards(node, out = []) {
   (node.children || []).forEach((c) => collectCards(c, out));
   return out;
 }
+
+// ---- 服务树的断言辅助：树节点是 createElement 造出来的，不走 q(sel) ----
+// 直接派发某个元素上的事件（模拟"只点这一行"）。
+async function fireOn(el, ev, extra = {}) {
+  const fns = (el._handlers && el._handlers[ev]) || [];
+  for (const fn of fns) {
+    const r = fn(Object.assign({ target: el }, extra));
+    if (r && typeof r.then === 'function') await r;
+  }
+  return fns.length;
+}
+
+function isTreeNode(n) {
+  return String(n.className || '').split(' ').includes('tree__node');
+}
+
+// 树上的所有节点（含服务叶子；先序）。
+function collectTreeNodes(node, out = []) {
+  if (isTreeNode(node)) out.push(node);
+  (node.children || []).forEach((c) => collectTreeNodes(c, out));
+  return out;
+}
+
+// 顶级节点 = 最外层的几棵子树（部门 / 未归属部门）。
+const treeTopNodes = (root) => (root.children || []).filter(isTreeNode);
+const treeRow = (n) => n.children[0];    // 第一行（可点，写着一行文字）
+const treeKids = (n) => n.children[1];   // 第二行是子容器（收起时 hidden）
+const treeLabel = (n) => treeRow(n).children[1].textContent;
+const treeCaret = (n) => treeRow(n).children[0].textContent;
+const treeBadges = (n) => treeRow(n).children[2].innerHTML;
+const treeIsOpen = (n) => treeKids(n).hidden === false;
+const treeFind = (node, label) => collectTreeNodes(node).find((n) => treeLabel(n) === label);
 
 // 模拟用户点「展开」：<details> 的 open 由浏览器切换，然后派发 toggle 事件。
 async function userToggle(dom, details, open) {
@@ -440,6 +477,165 @@ async function scenarioExpandedCardStaysOpen() {
   check(afterCollapse[0].open === false, '用户手动收起的卡片保持收起（不擅自弹开）');
 }
 
+// ---- 服务树 ----
+async function scenarioServiceTreeGroups() {
+  console.log('\n场景：服务树按部门分组，默认全部收起');
+  const sre = { ...EVENT_CENTER, departmentId: 'D0001', departmentName: 'SRE部门' };
+  const eff = { ...EVENT_CENTER, name: 'billing', departmentId: 'D0002', departmentName: '工程效能部门' };
+  const plain = { ...EVENT_CENTER, name: 'plain-service' };
+  const dom = buildDom({ services: [sre, eff, plain] });
+  await click(dom, '#tree-refresh');
+  const root = dom.q('#tree-root');
+
+  let top = treeTopNodes(root);
+  check(top.length === 3, '顶级节点 = 组织目录的 2 个部门 + 未归属部门（实际 ' + top.length + '）');
+  check(top.every((n) => !treeIsOpen(n)) && top.every((n) => treeCaret(n) === '▸'),
+    '默认全部收起（▸ + 子容器 hidden）—— 就是这次要的默认态');
+  const labels = top.map(treeLabel);
+  check(labels.includes('SRE部门（D0001）') && labels.includes('工程效能部门（D0002）')
+    && labels.includes('未归属部门') && labels[labels.length - 1] === '未归属部门',
+    '部门来自组织目录、标签是「名称（ID）」，未归属部门永远排最后：' + labels.join(' | '));
+  check(treeBadges(top[0]).includes('1 个服务'), '部门上带服务数：' + treeBadges(top[0]));
+  check(!treeBadges(top[0]).includes('仅契约声明'), '组织目录里的部门不标「仅契约声明」');
+  check(String(dom.q('#tree-note').textContent).includes('部门目录来自组织接口')
+    && String(dom.q('#tree-note').textContent).includes('另有 1 个未填归属部门'),
+    '工具条说明数据成色与规模：' + JSON.stringify(dom.q('#tree-note').textContent));
+
+  const sreNode = treeFind(root, 'SRE部门（D0001）');
+  const svcNode = treeFind(treeKids(sreNode), 'default/event-center');
+  check(!!sreNode && !!svcNode, '事件中心挂在 SRE部门 下');
+  check(!treeIsOpen(svcNode), '服务节点默认也是收起的');
+
+  const effNode = treeFind(root, '工程效能部门（D0002）');
+  check(await fireOn(treeRow(sreNode), 'click') === 1, '行上注册了 click（点一下能开合）');
+  check(treeIsOpen(sreNode) && treeCaret(sreNode) === '▾', '点一下展开（▸ → ▾）');
+  check(!treeIsOpen(effNode), '只展开被点的那一个，同级部门不受影响');
+
+  await fireOn(treeRow(svcNode), 'click');
+  check(treeIsOpen(svcNode), '服务节点也能展开');
+  check(treeKids(svcNode).children[0].innerHTML.includes('健康检查'),
+    '展开服务看到它的对外 API 端点表（不用额外请求）');
+
+  await fireOn(treeRow(sreNode), 'click');
+  check(!treeIsOpen(sreNode), '再点一次收起');
+
+  // 自动刷新：数据没变 → 一行 DOM 都不动（展开状态自然保留）
+  await fireOn(treeRow(sreNode), 'click');
+  await click(dom, '#tree-refresh');
+  top = treeTopNodes(root);
+  check(top.length === 3, '自动刷新没有把节点重复堆积（' + top.length + ' 个顶级节点）');
+  check(treeFind(root, 'SRE部门（D0001）') === sreNode, '数据没变时复用同一批节点（不重建、不闪）');
+  check(treeIsOpen(sreNode), '自动刷新后依然展开');
+
+  // 数据变了（别的平台新登记了一个服务）：重建也必须保住用户展开的那枝
+  dom.setServices([sre, eff, plain, { ...EVENT_CENTER, name: 'new-svc', departmentId: 'D0001', departmentName: 'SRE部门' }]);
+  await click(dom, '#tree-refresh');
+  const sreAfter = treeFind(root, 'SRE部门（D0001）');
+  check(sreAfter !== sreNode, '数据变化后确实重建了节点');
+  check(treeIsOpen(sreAfter), '重建后用户点开的部门仍然展开 —— 与「服务目录」卡片同一条语义');
+  check(treeBadges(sreAfter).includes('2 个服务'), '部门上的服务数跟着变：' + treeBadges(sreAfter));
+  check(!treeIsOpen(treeFind(root, '工程效能部门（D0002）')), '没被点开的部门依然是收起的');
+}
+
+async function scenarioServiceTreeHierarchy() {
+  console.log('\n场景：部门自己也是棵树（组织接口给了 parentId），0 服务的部门也列出来');
+  const catalog = {
+    ...ORG_CATALOG,
+    departments: [
+      { id: 'D0001', name: '集团', type: '管理' },
+      { id: 'D0002', name: 'SRE部门', type: '研发', parentId: 'D0001' },
+      { id: 'D0003', name: 'AI架构部门', type: '研发' }, // 组织里有、但还没有服务
+    ],
+  };
+  const svc = { ...EVENT_CENTER, departmentId: 'D0002', departmentName: 'SRE部门' };
+  const orphan = { ...EVENT_CENTER, name: 'legacy', departmentId: 'D0099', departmentName: '已下线部门' };
+  const dom = buildDom({ deptCatalog: catalog, services: [svc, orphan] });
+  await click(dom, '#tree-refresh');
+  const root = dom.q('#tree-root');
+
+  const topLabels = treeTopNodes(root).map(treeLabel).sort();
+  check(topLabels.join(' | ') === ['AI架构部门（D0003）', '集团（D0001）', '已下线部门（D0099）'].sort().join(' | '),
+    '子部门不占顶层位置（顶层 = ' + topLabels.join(' | ') + '）');
+  const group = treeFind(root, '集团（D0001）');
+  const sre = treeFind(treeKids(group), 'SRE部门（D0002）');
+  check(!!sre, 'parentId 生效：SRE部门 挂在 集团 下面');
+  check(!!treeFind(treeKids(sre), 'default/event-center'), '服务挂在子部门下');
+  const ai = treeFind(root, 'AI架构部门（D0003）');
+  check(treeBadges(ai).includes('0 个服务'), '还没有服务的部门也列出来（0 个服务）：' + treeBadges(ai));
+  check(treeKids(ai).children[0].textContent === '该部门下暂无登记的服务', '展开只有一句说明，不是空白');
+  const legacy = treeFind(root, '已下线部门（D0099）');
+  check(!!legacy && treeBadges(legacy).includes('仅契约声明'),
+    '目录里查不到的部门（契约上的声明值）也成一枝、并标明来源：' + (legacy ? treeBadges(legacy) : '(丢了)'));
+
+  // 父节点互相成环：断链当根，不能让整枝从界面上消失
+  const cyclic = {
+    ...ORG_CATALOG,
+    departments: [
+      { id: 'D0001', name: '甲部门', parentId: 'D0002' },
+      { id: 'D0002', name: '乙部门', parentId: 'D0001' },
+    ],
+  };
+  const dom2 = buildDom({ deptCatalog: cyclic, services: [{ ...EVENT_CENTER, departmentId: 'D0001', departmentName: '甲部门' }] });
+  await click(dom2, '#tree-refresh');
+  const root2 = dom2.q('#tree-root');
+  check(!!treeFind(root2, '甲部门（D0001）') && !!treeFind(root2, '乙部门（D0002）'),
+    '成环的部门仍都画得出来（各自断链当根）');
+  check(!!treeFind(root2, 'default/event-center'), '成环也不吞掉挂在它下面的服务');
+
+  // 组织接口不可达 + 目录也为空：只能列出契约上出现过的部门，并说明是降级数据
+  const down = { ...ORG_CATALOG, available: false, cached: true, stale: true, departments: [], error: '请求组织接口失败：connection refused' };
+  const dom3 = buildDom({ deptCatalog: down, services: [orphan] });
+  await click(dom3, '#tree-refresh');
+  const top3 = treeTopNodes(dom3.q('#tree-root'));
+  check(top3.length === 1 && treeLabel(top3[0]) === '已下线部门（D0099）',
+    '降级时只列契约上出现过的部门（实际 ' + top3.map(treeLabel).join(' | ') + '）');
+  check(dom3.q('#tree-note').className.includes('note--warn')
+    && String(dom3.q('#tree-note').textContent).includes('组织接口暂时不可达'),
+    '降级时用醒目样式说明成色：' + JSON.stringify(dom3.q('#tree-note').textContent));
+}
+
+async function scenarioServiceTreeFilter() {
+  console.log('\n场景：服务树过滤 / 全部展开收起');
+  const sre = { ...EVENT_CENTER, departmentId: 'D0001', departmentName: 'SRE部门' };
+  const eff = { ...EVENT_CENTER, name: 'billing', departmentId: 'D0002', departmentName: '工程效能部门' };
+  const dom = buildDom({ services: [sre, eff] });
+  await click(dom, '#tree-refresh');
+  const root = dom.q('#tree-root');
+  check(treeTopNodes(root).length === 2, '两个部门');
+
+  dom.q('#tree-filter').value = 'billing';
+  await fire(dom, '#tree-filter', 'input');
+  let top = treeTopNodes(root);
+  check(top.length === 1 && treeLabel(top[0]) === '工程效能部门（D0002）',
+    '过滤后只留命中的那一枝（实际 ' + top.map(treeLabel).join(' | ') + '）');
+  check(treeIsOpen(top[0]) && treeIsOpen(treeFind(treeKids(top[0]), 'default/billing')),
+    '过滤时命中项自动展开（否则命中还埋在折叠里）');
+  check(treeBadges(top[0]).includes('命中 1/1'), '部门上写明命中几个：' + treeBadges(top[0]));
+
+  dom.q('#tree-filter').value = '';
+  await fire(dom, '#tree-filter', 'input');
+  top = treeTopNodes(root);
+  check(top.length === 2, '清空过滤后回到全量');
+  check(top.every((n) => !treeIsOpen(n)), '清空过滤后回到默认收起（临时展开不残留）');
+
+  await click(dom, '#tree-expand-all');
+  check(collectTreeNodes(root).every(treeIsOpen), '「全部展开」把整棵树都展开');
+  await click(dom, '#tree-collapse-all');
+  check(collectTreeNodes(root).every((n) => !treeIsOpen(n)), '「全部收起」把整棵树都收起');
+
+  // 全部展开 → 数据变化重建 → 原来展开的还展开（新出现的那枝按默认收起，不擅自弹开）
+  await click(dom, '#tree-expand-all');
+  dom.setServices([sre, eff, { ...EVENT_CENTER, name: 'third' }]);
+  await click(dom, '#tree-refresh');
+  check(treeTopNodes(root).length === 3, '新服务带来新的「未归属部门」枝');
+  const d1 = treeFind(root, 'SRE部门（D0001）');
+  const d2 = treeFind(root, '工程效能部门（D0002）');
+  const un = treeFind(root, '未归属部门');
+  check(treeIsOpen(d1) && treeIsOpen(d2) && treeIsOpen(treeFind(treeKids(d1), 'default/event-center')),
+    '重建后原来展开的节点仍然展开（含服务叶子）');
+  check(!treeIsOpen(un), '新出现的枝默认收起（与新服务卡片同一条语义）');
+}
+
 console.log('面板冒烟测试（web/panel-smoke.mjs）');
 for (const s of [
   scenarioFormOpensWithTemplate,
@@ -450,6 +646,9 @@ for (const s of [
   scenarioDepartmentFromOrg,
   scenarioDepartmentOffline,
   scenarioDepartmentFilter,
+  scenarioServiceTreeGroups,
+  scenarioServiceTreeHierarchy,
+  scenarioServiceTreeFilter,
   scenarioSuccess,
   scenarioServerError,
   scenarioInstanceForm,

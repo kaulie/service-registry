@@ -27,7 +27,7 @@ func fakeOrg(t *testing.T, items string) *httptest.Server {
 
 const orgItems = `{"id":"D0001","name":"SRE部门","type":"研发"},
   {"id":"D0002","name":"工程效能部门","type":"研发"},
-  {"id":"D0003","name":"AI架构部门","type":"研发"}`
+  {"id":"D0003","name":"AI架构部门","type":"研发","parentId":"D0001"}`
 
 // withOrg 让测试环境指向一个"活着的"组织接口。
 func withOrg(ts *httptest.Server) func(*config.Config) {
@@ -58,6 +58,10 @@ func TestDepartmentsCatalogEndpoint(t *testing.T) {
 	first := deps[0].(map[string]any)
 	if first["id"] != "D0001" || first["name"] != "SRE部门" || first["type"] != "研发" {
 		t.Fatalf("部门字段应原样透出（id/name/type）：%v", first)
+	}
+	// 组织接口如果给了 parentId（部门本身是棵树），也要原样透出 —— 面板的「服务树」页签靠它摆层级。
+	if third := deps[2].(map[string]any); third["parentId"] != "D0001" {
+		t.Fatalf("部门的上层（parentId）应原样透出：%v", third)
 	}
 	if types := out["types"].([]any); len(types) != 4 {
 		t.Fatalf("部门类型候选也应透出，实际 %v", types)

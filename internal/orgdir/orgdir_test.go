@@ -163,6 +163,35 @@ func TestFind(t *testing.T) {
 	}
 }
 
+// TestParentIDPassthrough 覆盖：组织接口如果给了上级部门（部门本身是棵树），
+// 本中心**原样透出** parentId（去空白），不加工、不校验父是否存在 ——
+// 面板的「服务树」页签靠它把部门挂成层级；没这个字段时行为与从前完全一致。
+func TestParentIDPassthrough(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"items":[
+  {"id":"D0001","name":"集团","type":"管理"},
+  {"id":"D0002","name":"SRE部门","type":"研发","parentId":" D0001 "},
+  {"id":"D0003","name":"平台组","type":"研发","parentId":"D9999"}
+]}`))
+	}))
+	defer ts.Close()
+
+	snap := NewClient(ts.URL, time.Second, 0).Snapshot(context.Background(), false)
+	if len(snap.Departments) != 3 {
+		t.Fatalf("应有 3 个部门：%+v", snap.Departments)
+	}
+	if got := snap.Departments[0].ParentID; got != "" {
+		t.Errorf("顶层部门的 ParentID 应为空，实际 %q", got)
+	}
+	if got := snap.Departments[1].ParentID; got != "D0001" {
+		t.Errorf("parentId 应原样带出并去掉首尾空白，实际 %q", got)
+	}
+	// 父不存在的也照原样留着（本中心不做层级校验，摆不摆得下由消费方决定）。
+	if got := snap.Departments[2].ParentID; got != "D9999" {
+		t.Errorf("查不到的 parentId 也应原样透出，实际 %q", got)
+	}
+}
+
 func TestSnippet(t *testing.T) {
 	if got := snippet(nil); got != "(空响应)" {
 		t.Fatalf("空响应应可读：%q", got)

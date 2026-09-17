@@ -137,6 +137,26 @@ button[disabled] { opacity: .6; cursor: progress; }
 .toast--bad { border-color: var(--bad); }
 
 details summary { cursor: pointer; color: var(--accent); font-size: 12px; }
+
+/* ---- 服务树（独立页签） ----
+   默认收起：靠每一行的 ▸/▾ 展开。节点的开合状态由 app.js 的 treeExpanded 记着，
+   自动刷新重建 DOM 后会照样恢复（与「服务目录」卡片的展开是同一套做法）。 */
+.tree { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.tree__node { margin-left: 12px; padding-left: 8px; border-left: 1px dashed var(--line); }
+.tree > .tree__node { margin-left: 0; padding-left: 0; border-left: none; }
+.tree__row {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  padding: 3px 6px; border-radius: 6px; cursor: pointer;
+}
+.tree__row:hover { background: var(--panel-2); }
+.tree__row:focus-visible { outline: 1px solid var(--accent); }
+.tree__caret { color: var(--accent); font-size: 11px; width: 10px; display: inline-block; }
+.tree__label { font-family: var(--mono); }
+.tree__extra { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.tree__node--dept > .tree__row > .tree__label { font-weight: 600; }
+.tree__children[hidden] { display: none; }
+.tree__empty { color: var(--muted); font-size: 12px; padding: 2px 6px; }
+.actions .grow { flex: 1 1 260px; }
 .kv { display: grid; grid-template-columns: 150px 1fr; gap: 4px 10px; font-size: 12px; margin-top: 8px; }
 .kv dt { color: var(--muted); }
 .kv dd { margin: 0; font-family: var(--mono); word-break: break-all; }

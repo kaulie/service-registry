@@ -79,6 +79,7 @@ function refreshActive() {
   switch (activeTab) {
     case 'overview': return renderOverview();
     case 'services': return renderServices();
+    case 'tree': return renderServiceTree();
     case 'instances': return renderInstances();
     case 'changes': return renderChanges();
     case 'namespaces': return renderNamespaces();
@@ -549,6 +550,283 @@ async function fillCallExample(body, svc, endpoints) {
   }
   body.appendChild(el('h2', null, '调用示例'));
   body.appendChild(el('pre', 'code', lines.join('\n')));
+}
+
+// ---- 服务树（独立页签） ----
+// 把「组织架构（部门）」与「服务契约」两张数据拼成一棵树：
+//
+//   部门 A（组织目录里的部门，0 个服务也列出来，好回答"这个组织里有什么"）
+//     ├─ 子部门 A1（组织接口给了 parentId 时才有这一层）
+//     │   └─ default/event-center  v0.1.0 · 1 实例 · 1 端点   ← 展开就是它的对外 API 端点表
+//     └─ …
+//   未归属部门（契约上没填 departmentId/departmentName 的服务，永远排最后）
+//
+// 三条「不能丢」的语义：
+//   ① **默认收起**：部门多的时候先看骨架，点 ▸ 才展开（服务节点同理）；
+//   ② 开合是**用户的状态**：自动刷新（3s）重建 DOM 后必须原样保留；数据没变时连 DOM 都不碰 ——
+//      与「服务目录」卡片的展开是同一套做法（那里踩过"点开看两眼就被自动收起来"的坑）；
+//   ③ 部门节点的来源是**并集**：组织目录里的部门（哪怕 0 个服务）∪ 契约上实际用到的部门
+//      （组织接口不可达时按声明值保存的那些也要看得见）。
+const treeExpanded = new Set();       // 用户点开的节点（自动刷新后要恢复的就是它）
+const treeFilterExpanded = new Set(); // 过滤时为「命中项」临时展开的节点（清空过滤即失效）
+let treeIndex = new Map();            // key → {key, node, kids, caret}（「全部展开/收起」用）
+let treeForceExpand = false;          // 过滤中：新建的节点默认展开（否则命中项还埋在折叠里）
+let lastTreeSig = null;
+
+const TREE_UNASSIGNED = 'dept:__unassigned__'; // 「未归属部门」的哨兵 key
+
+const treeDeptLabel = (g) => deptText({ id: g.id, name: g.name });
+const treeDeptKey = (g) => 'dept:' + (g.id || g.name);
+const treeSvcKey = (svc) => 'svc:' + svcKey(svc);
+const treeDeptSort = (a, b) => treeDeptLabel(a).localeCompare(treeDeptLabel(b), 'zh');
+const treeOpen = (key) => treeExpanded.has(key) || treeFilterExpanded.has(key);
+
+// treeSvcHit / treeDeptHit：过滤框的匹配规则（大小写不敏感的子串，与「服务目录」一致）。
+function treeSvcHit(svc, f) {
+  if (!f) return true;
+  return [svc.namespace, svc.name, svc.owner, svc.version, svc.description, svc.gitRepoUrl,
+    svc.departmentId, svc.departmentName, (svc.tags || []).join(' ')]
+    .join(' ').toLowerCase().includes(f);
+}
+
+function treeDeptHit(g, f) {
+  if (!f) return true;
+  return (treeDeptLabel(g) + ' ' + g.id + ' ' + g.name).toLowerCase().includes(f);
+}
+
+// treeGroups 把服务按归属部门分组，并把组织目录里"还没有服务"的部门也建成空组。
+// 同一个部门在契约上可能只带 ID 或只带名字，所以用 ID 与名字两套索引互相兜底
+// （只带名字、而组织目录里有它的服务，也会归到目录里那个部门下）。
+function treeGroups(services, cat) {
+  const groups = [];
+  const byId = new Map();
+  const byName = new Map();
+  const add = (id, name, meta) => {
+    id = String(id || '').trim();
+    name = String(name || '').trim();
+    const g = {
+      id, name,
+      type: String((meta && meta.type) || '').trim(),
+      parentId: String((meta && meta.parentId) || '').trim(),
+      declared: !!(meta && meta.declared), // 组织目录里"建过档"的部门（不是只被契约引用）
+      services: [], children: [],
+    };
+    groups.push(g);
+    if (id) byId.set(id.toLowerCase(), g);
+    if (name) byName.set(name.toLowerCase(), g);
+    return g;
+  };
+  (cat.departments || []).forEach((d) => add(d.id, d.name, { type: d.type, parentId: d.parentId, declared: true }));
+  (services || []).forEach((svc) => {
+    const id = String(svc.departmentId || '').trim();
+    const name = String(svc.departmentName || '').trim();
+    if (!id && !name) return; // 没有部门字段：另外归到「未归属部门」
+    const g = (id && byId.get(id.toLowerCase())) || (name && byName.get(name.toLowerCase())) || add(id, name, null);
+    g.services.push(svc);
+  });
+  return groups;
+}
+
+// treeRoots 把部门拼成层级：组织接口给了 parentId 就挂到父下面（父不存在/自己指向自己当根）。
+// 互相成环的那部分会被"断链"提升为根 —— 宁可摆得不理想，也不能让一棵子树从界面上消失。
+function treeRoots(groups) {
+  const byId = new Map();
+  groups.forEach((g) => { if (g.id) byId.set(g.id.toLowerCase(), g); });
+  const roots = [];
+  groups.forEach((g) => {
+    const p = g.parentId ? byId.get(g.parentId.toLowerCase()) : null;
+    if (p && p !== g) p.children.push(g); else roots.push(g);
+  });
+  const seen = new Set();
+  const walk = (g) => { if (seen.has(g)) return; seen.add(g); g.children.forEach(walk); };
+  roots.forEach(walk);
+  groups.forEach((g) => {
+    if (seen.has(g)) return;
+    const p = g.parentId ? byId.get(g.parentId.toLowerCase()) : null;
+    if (p && p !== g) p.children = p.children.filter((c) => c !== g); // 断环
+    roots.push(g);
+    walk(g);
+  });
+  return roots;
+}
+
+// applyTreeOpen 只改这一个节点的 DOM（caret 文案 + 子容器显隐），不整棵重建 ——
+// 点开一个部门不该让其它节点重新渲染（也就不闪、不丢滚动位置）。
+function applyTreeOpen(entry) {
+  const open = treeOpen(entry.key);
+  entry.caret.textContent = open ? '▾' : '▸';
+  entry.kids.hidden = !open;
+  entry.row.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (open) entry.node.classList.add('tree__node--open');
+  else entry.node.classList.remove('tree__node--open');
+}
+
+// treeNode 造一个节点：一行（可点）+ 子容器（默认收起），并登记进 treeIndex。
+function treeNode(key, label, badges, children, cls) {
+  const node = el('div', 'tree__node' + (cls ? ' ' + cls : ''));
+  node.dataset.key = key;
+  const row = el('div', 'tree__row');
+  row.dataset.key = key;
+  row.tabIndex = 0;
+  row.setAttribute('role', 'button');
+  row.appendChild(el('span', 'tree__caret', '▸'));
+  row.appendChild(el('span', 'tree__label', label));
+  const extra = el('span', 'tree__extra');
+  extra.innerHTML = badges || '';
+  row.appendChild(extra);
+  node.appendChild(row);
+
+  const kids = el('div', 'tree__children');
+  (children || []).forEach((c) => kids.appendChild(c));
+  node.appendChild(kids);
+
+  const entry = { key, node, row, kids, caret: row.children[0] };
+  treeIndex.set(key, entry);
+  if (treeForceExpand) treeFilterExpanded.add(key); // 过滤时命中的节点自动展开
+
+  const flip = (ev) => {
+    // 行里也可能有链接（代码仓库 / API 文档）：点链接就只走链接，别顺手把节点开合掉。
+    if (ev && ev.target && String(ev.target.tagName || '').toLowerCase() === 'a') return;
+    const open = !treeOpen(key);
+    if (open) treeExpanded.add(key);
+    else { treeExpanded.delete(key); treeFilterExpanded.delete(key); }
+    applyTreeOpen(entry);
+  };
+  row.addEventListener('click', flip);
+  row.addEventListener('keydown', (ev) => { if (ev && (ev.key === 'Enter' || ev.key === ' ')) flip(); });
+
+  applyTreeOpen(entry);
+  return node;
+}
+
+// treeSvcNode 是叶子：服务。展开就是它的对外 API 端点表 + 仓库/spec 链接
+// （端点早就随列表返回了，这里不再多打一次请求）。
+function treeSvcNode(svc) {
+  const api = svc.api || {};
+  const endpoints = api.endpoints || [];
+  const badges = [
+    svc.version ? `<span class="tag">v${esc(svc.version)}</span>` : '',
+    `<span class="badge ${svc.instanceCount > 0 ? 'badge--ok' : 'badge--warn'}">${esc(svc.instanceCount)} 实例</span>`,
+    `<span class="badge badge--muted">${esc(endpoints.length)} 端点</span>`,
+    svc.owner ? `<span class="tag">owner:${esc(svc.owner)}</span>` : '',
+    svc.gitRepoUrl ? repoTag(svc.gitRepoUrl) : '',
+    svc.healthPath ? `<span class="tag">health:${esc(svc.healthPath)}</span>` : '',
+    `<span class="item__meta">revision ${esc(svc.revision || 0)}</span>`,
+  ].join('');
+  return treeNode(treeSvcKey(svc), svcKey(svc), badges,
+    [endpointsTable(endpoints, api.docsUrl, api.specUrl, svc)], 'tree__node--svc');
+}
+
+// treeDeptNode 渲染一个部门节点（子部门 + 自己名下的服务）。
+// 过滤时：部门名命中 → 它名下的服务全显示；没命中 → 只显示命中的服务；
+// 自己、服务、子部门都没命中 → 整支不显示（返回 null）。
+function treeDeptNode(g, f) {
+  const kids = [];
+  g.children.slice().sort(treeDeptSort).forEach((c) => {
+    const node = treeDeptNode(c, f);
+    if (node) kids.push(node);
+  });
+  const hit = treeDeptHit(g, f);
+  const services = (hit ? g.services : g.services.filter((s) => treeSvcHit(s, f)))
+    .slice().sort((a, b) => svcKey(a).localeCompare(svcKey(b), 'zh'));
+  if (f && !hit && !services.length && !kids.length) return null;
+
+  services.forEach((svc) => kids.push(treeSvcNode(svc)));
+  if (!services.length && !kids.length) kids.push(el('div', 'tree__empty', '该部门下暂无登记的服务'));
+
+  const n = g.services.length;
+  const badges = [
+    n ? `<span class="badge badge--ok">${n} 个服务</span>` : '<span class="badge badge--muted">0 个服务</span>',
+    f && !hit ? `<span class="tag">命中 ${services.length}/${n}</span>` : '',
+    g.type ? `<span class="tag">${esc(g.type)}</span>` : '',
+    (!g.declared && deptCatalog.enabled && deptCatalog.available)
+      ? '<span class="tag" title="组织接口的部门目录里没有它：这份归属来自契约上的声明值">仅契约声明</span>' : '',
+  ].join('');
+  return treeNode(treeDeptKey(g), treeDeptLabel(g), badges, kids, 'tree__node--dept');
+}
+
+// treeUnassignedNode 是「未归属部门」：契约上没填部门字段的服务。
+// 它不在组织架构里，单独一组、永远排最后，免得这些服务在树上"消失"。
+function treeUnassignedNode(services) {
+  const kids = services.slice().sort((a, b) => svcKey(a).localeCompare(svcKey(b), 'zh')).map(treeSvcNode);
+  const badges = [
+    `<span class="badge badge--warn">${services.length} 个服务</span>`,
+    '<span class="tag" title="登记/编辑契约时补上归属部门，它们就会自动归到对应部门下">未填归属部门</span>',
+  ].join('');
+  return treeNode(TREE_UNASSIGNED, '未归属部门', badges, kids, 'tree__node--dept tree__node--unassigned');
+}
+
+// renderTreeNote 写清楚"这棵树的数据成色与规模"：
+// 组织接口可用时列出的部门是组织架构的真实全量（0 个服务的也在），不可用时只有契约上出现过的部门。
+function renderTreeNote(services) {
+  const node = $('#tree-note');
+  if (!node) return;
+  const c = deptCatalog;
+  const depts = (c.departments || []).length;
+  const unassigned = services.filter((s) =>
+    !String(s.departmentId || '').trim() && !String(s.departmentName || '').trim()).length;
+  const counts = `${services.length} 个服务 / ${depts} 个部门`
+    + (unassigned ? `（另有 ${unassigned} 个未填归属部门）` : '');
+  let src, warn = false;
+  if (!c.enabled) {
+    src = '组织接口未配置（REGISTRY_ORG_URL）：只能列出契约上出现过的部门，"还没有服务的部门"列不出来';
+    warn = true;
+  } else if (c.available) {
+    src = `部门目录来自组织接口${c.url ? ' ' + c.url : ''}${c.cached ? '（TTL 缓存）' : ''}`
+      + (c.fetchedAt ? ' · ' + fmtTime(c.fetchedAt) : '');
+  } else {
+    src = `组织接口暂时不可达（${c.error || '未知原因'}）：`
+      + (depts ? `用的是上次同步的 ${depts} 个部门` : '只能列出契约上出现过的部门');
+    warn = true;
+  }
+  node.className = 'note grow' + (warn ? ' note--warn' : '');
+  node.textContent = counts + ' · ' + src;
+}
+
+// renderTreeBody 重建整棵树（只有数据/过滤条件真的变了才会走到这里）。
+function renderTreeBody(services, filter) {
+  treeIndex = new Map();
+  treeFilterExpanded.clear();
+  treeForceExpand = !!filter;
+
+  const box = $('#tree-root');
+  box.innerHTML = '';
+  const nodes = [];
+  treeRoots(treeGroups(services, deptCatalog)).slice().sort(treeDeptSort).forEach((g) => {
+    const node = treeDeptNode(g, filter);
+    if (node) nodes.push(node);
+  });
+  const unassigned = services
+    .filter((s) => !String(s.departmentId || '').trim() && !String(s.departmentName || '').trim())
+    .filter((s) => treeSvcHit(s, filter));
+  if (unassigned.length) nodes.push(treeUnassignedNode(unassigned));
+
+  if (!nodes.length) {
+    box.appendChild(el('div', 'tree__empty',
+      filter ? '没有匹配的部门或服务。' : '还没有任何部门与服务：先登记服务契约，或在组织架构服务里建部门。'));
+    return;
+  }
+  nodes.forEach((n) => box.appendChild(n));
+}
+
+async function renderServiceTree() {
+  const res = await api('/v1/services');
+  if (!res.ok) { toast('读取服务列表失败：' + JSON.stringify(res.data), true); return; }
+  const services = res.data.services || [];
+  await loadDepartments(false);
+  const filter = $('#tree-filter').value.trim().toLowerCase();
+  renderTreeNote(services); // 成色/规模：一行文字，每次刷新都更新（不会闪）
+
+  // 数据（含部门目录）+ 过滤条件都没变 → 一行 DOM 都不动，展开状态自然原样保留。
+  // 注意签名只用**稳定字段**：deptCatalog 里的 cached/fetchedAt 每次刷新都在变，
+  // 让它们参与签名就等于每 3s 重建一次整棵树（展开状态会丢、还会闪）。
+  const sig = JSON.stringify({
+    filter, services,
+    cat: [deptCatalog.enabled, deptCatalog.available, deptCatalog.stale, deptCatalog.departments || []],
+  });
+  if (sig === lastTreeSig) return;
+  lastTreeSig = sig;
+  renderTreeBody(services, filter);
 }
 
 // ---- API 检索 ----
@@ -1129,6 +1407,18 @@ async function submitBatchForm() {
 }
 
 $('#svc-refresh').addEventListener('click', renderServices);
+$('#tree-refresh').addEventListener('click', renderServiceTree);
+$('#tree-filter').addEventListener('input', renderServiceTree);
+// 「全部展开 / 全部收起」：一次调整整棵树（过滤后只剩一部分节点时，也只动看得见的那些）。
+// 展开是记进 treeExpanded 的，所以自动刷新重建 DOM 后依然是展开的。
+$('#tree-expand-all').addEventListener('click', () => {
+  treeIndex.forEach((entry) => { treeExpanded.add(entry.key); applyTreeOpen(entry); });
+});
+$('#tree-collapse-all').addEventListener('click', () => {
+  treeExpanded.clear();
+  treeFilterExpanded.clear();
+  treeIndex.forEach((entry) => applyTreeOpen(entry));
+});
 $('#svc-filter').addEventListener('input', renderServices);
 $('#svc-tag-filter').addEventListener('change', renderServices);
 $('#svc-dept-filter').addEventListener('change', renderServices);
