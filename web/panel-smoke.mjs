@@ -74,6 +74,7 @@ function buildDom(scenario = {}) {
     '/health': { body: { status: 'ok', version: 'test' } },
     '/v1/meta': { body: { version: 'test', uptimeSeconds: 1, revision: 0, writeAuth: 'open', counts: { namespaces: 1, services: 0, instances: 0, endpoints: 0, changes: 0 } } },
     '/v1/services': { body: { services: scenario.services || [], total: (scenario.services || []).length } },
+    '/v1/departments': { body: scenario.deptCatalog || ORG_CATALOG },
   };
 
   const sandbox = {
@@ -290,6 +291,94 @@ const EVENT_CENTER = {
   },
 };
 
+// 组织架构服务（organization）的部门目录：面板的部门下拉就是它。
+const ORG_CATALOG = {
+  source: 'organization',
+  url: 'http://127.0.0.1:4244',
+  path: '/api/v1/departments',
+  enabled: true, available: true, cached: false, stale: false,
+  fetchedAt: '2026-09-17T05:05:00Z',
+  departments: [
+    { id: 'D0001', name: 'SRE部门', type: '研发' },
+    { id: 'D0002', name: '工程效能部门', type: '研发' },
+  ],
+  types: ['研发', '测试', '产品', '管理'],
+};
+
+// 触发某个元素上的事件处理器（change/input 之类没有 click 的快捷方式）。
+async function fire(dom, sel, ev) {
+  const fns = dom.handlers.get(sel + '|' + ev) || [];
+  for (const fn of fns) {
+    const r = fn({ target: dom.q(sel) });
+    if (r && typeof r.then === 'function') await r;
+  }
+  return fns.length;
+}
+
+async function scenarioDepartmentFromOrg() {
+  console.log('\n场景：归属部门的候选来自组织接口（登记时对齐）');
+  const dom = buildDom();
+  await click(dom, '#svc-new');
+  await new Promise((r) => setTimeout(r, 0));
+  check(dom.q('#svc-form-dept').innerHTML.includes('SRE部门（D0001）'),
+    '表单部门下拉是组织接口给的目录：' + JSON.stringify(dom.q('#svc-form-dept').innerHTML));
+  check(String(dom.q('#svc-form-dept-note').textContent).includes('已从组织接口同步 2 个部门'),
+    '表单里写明"数据来源/成色"：' + JSON.stringify(dom.q('#svc-form-dept-note').textContent));
+
+  fillServiceForm(dom, { '#svc-form-dept': 'id:D0001' });
+  await click(dom, '#svc-form-submit');
+  const put = dom.requests.find((r) => r.method === 'PUT');
+  const body = put ? JSON.parse(put.body) : {};
+  check(body.departmentId === 'D0001', '请求体带上了部门 ID：' + (put ? put.body : '(无请求)'));
+  check(body.departmentName === 'SRE部门', '同时带上权威部门名（消费方不用再查组织接口）');
+}
+
+async function scenarioDepartmentOffline() {
+  console.log('\n场景：组织接口不可达时的部门处理（不能阻塞登记）');
+  const down = {
+    ...ORG_CATALOG, available: false, cached: true, stale: true,
+    error: '请求组织接口失败：connection refused',
+  };
+  const svc = { ...EVENT_CENTER, departmentId: 'D0009', departmentName: '已下线部门' };
+  const dom = buildDom({ deptCatalog: down, services: [svc] });
+  await click(dom, '#svc-refresh');
+  const card = collectCards(dom.q('#svc-list'))[0];
+  check(!!card && card.innerHTML.includes('部门:已下线部门'),
+    '卡片照常显示部门（stale 的声明值也留着）');
+  check(!!card && card.innerHTML.includes('title="归属部门：已下线部门（D0009）'),
+    '部门标签的 title 里带 ID（悬停能看到权威标识）');
+
+  await click(dom, '#svc-new');
+  check(String(dom.q('#svc-form-dept-note').textContent).includes('组织接口暂时不可达'),
+    '表单明确说明目录为什么是旧的：' + JSON.stringify(dom.q('#svc-form-dept-note').textContent));
+  check(dom.q('#svc-form-dept').innerHTML.includes('已下线部门（D0009）'),
+    '服务上实际用到的部门仍在候选里（编辑时不会被静默清掉）');
+}
+
+async function scenarioDepartmentFilter() {
+  console.log('\n场景：按部门过滤服务目录');
+  const sre = { ...EVENT_CENTER, departmentId: 'D0001', departmentName: 'SRE部门' };
+  const eff = { ...EVENT_CENTER, name: 'billing', departmentId: 'D0002', departmentName: '工程效能部门' };
+  const plain = { ...EVENT_CENTER, name: 'plain-service' };
+  const dom = buildDom({ services: [sre, eff, plain] });
+  await click(dom, '#svc-refresh');
+  check(collectCards(dom.q('#svc-list')).length === 3, '未过滤时 3 张卡片');
+
+  dom.q('#svc-dept-filter').value = 'id:D0001';
+  await fire(dom, '#svc-dept-filter', 'change');
+  let cards = collectCards(dom.q('#svc-list'));
+  check(cards.length === 1 && cards[0].innerHTML.includes('event-center'),
+    '按 SRE部门 过滤只剩 1 张（实际 ' + cards.length + ' 张）');
+
+  // 关键字也能按部门名搜到（服务目录的过滤框）
+  dom.q('#svc-dept-filter').value = '';
+  dom.q('#svc-filter').value = '工程效能';
+  await fire(dom, '#svc-filter', 'input');
+  cards = collectCards(dom.q('#svc-list'));
+  check(cards.length === 1 && cards[0].innerHTML.includes('billing'),
+    '按部门名做关键字过滤能命中（实际 ' + cards.length + ' 张）');
+}
+
 async function scenarioRepoTagRendering() {
   console.log('\n场景：服务卡片上的代码仓库标签（gitRepoUrl）');
   const https = { ...EVENT_CENTER, gitRepoUrl: 'https://github.com/kaulie/event-center.git' };
@@ -358,6 +447,9 @@ for (const s of [
   scenarioInvalidName,
   scenarioInvalidGitRepoURL,
   scenarioRepoTagRendering,
+  scenarioDepartmentFromOrg,
+  scenarioDepartmentOffline,
+  scenarioDepartmentFilter,
   scenarioSuccess,
   scenarioServerError,
   scenarioInstanceForm,

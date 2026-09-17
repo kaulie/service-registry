@@ -53,8 +53,9 @@
     <section id="tab-services" class="tabpanel">
       <div class="actions">
         <button class="btn btn--primary" id="svc-new">＋ 登记服务契约</button>
-        <input type="search" id="svc-filter" placeholder="过滤：名字 / 描述 / owner / version / 仓库" />
+        <input type="search" id="svc-filter" placeholder="过滤：名字 / 描述 / owner / version / 仓库 / 部门" />
         <select id="svc-tag-filter"><option value="">全部标签</option></select>
+        <select id="svc-dept-filter" title="按归属部门过滤（部门数据来自组织接口）"><option value="">全部部门</option></select>
         <button class="btn" id="svc-refresh">刷新</button>
       </div>
 
@@ -72,6 +73,13 @@
           <label class="grow">标签（逗号分隔） <input type="text" id="svc-form-tags" placeholder="events,pubsub" /></label>
           <label class="grow">文档链接 <input type="text" id="svc-form-docs" placeholder="https://…" /></label>
           <label class="grow">代码仓库 gitRepoUrl <input type="text" id="svc-form-repo" placeholder="https://github.com/org/repo.git 或 git@host:org/repo.git" /></label>
+        </div>
+        <div class="form-row">
+          <label>归属部门
+            <select id="svc-form-dept" title="候选来自组织架构服务；组织接口不可达时按声明值保存"></select>
+          </label>
+          <button class="btn btn--small" id="svc-form-dept-refresh" type="button">重新同步部门</button>
+          <span class="note grow" id="svc-form-dept-note"></span>
         </div>
         <div class="form-row">
           <label>API 来源
@@ -127,6 +135,7 @@
           <option value="template">仅模板</option>
           <option value="glob">仅通配</option>
         </select>
+        <select id="api-dept" title="只看某个部门提供的接口（部门数据来自组织接口）"><option value="">全部部门</option></select>
         <button class="btn btn--primary" id="api-search">检索</button>
       </div>
       <div id="api-results" class="list"></div>

@@ -118,6 +118,7 @@ async function renderOverview() {
   $('#meta-revision').textContent = 'revision ' + m.revision;
   $('#meta-uptime').textContent = 'uptime ' + m.uptimeSeconds + 's';
 
+  const org = m.organization || {};
   const cards = [
     ['命名空间', m.counts.namespaces],
     ['服务契约', m.counts.services],
@@ -125,10 +126,17 @@ async function renderOverview() {
     ['API 端点', m.counts.endpoints],
     ['全局 revision', m.revision],
     ['变更记录', m.counts.changes],
+    // 部门数据的来源（组织架构服务）——面板里的部门下拉就是它。
+    ['部门（组织接口）', org.enabled ? '已配置' : '未配置'],
   ];
   const box = $('#overview-cards');
   box.innerHTML = cards.map(([label, value]) =>
     `<div class="card"><div class="card__label">${esc(label)}</div><div class="card__value">${esc(value)}</div></div>`).join('');
+  const lastCard = box.lastElementChild; // 真实 DOM 里就是刚渲染的最后一张卡片
+  if (org.enabled && lastCard) {
+    lastCard.title = `部门目录来自组织接口：${org.url || ''}${org.departmentsPath || ''}`
+      + `（本中心只读、缓存 ${org.cacheTtlSeconds}s，不维护部门数据）`;
+  }
   $('#overview-semantics').textContent = m.semantics;
 
   const base = location.origin;
@@ -144,15 +152,152 @@ async function renderOverview() {
     ``,
     `# 4) 发现：找服务 / 找实例 / 反查接口提供方`,
     `curl -sS '${base}/v1/services?tag=events'`,
+    `curl -sS '${base}/v1/services?department=D0001'`,
     `curl -sS '${base}/v1/namespaces/default/services/event-center/instances?pick=random'`,
     `curl -sS '${base}/v1/search/apis?method=GET&path=/v1/streams/abc/events'`,
+    ``,
+    `# 5) 部门目录：数据来自组织架构服务（organization），本中心只透出（短 TTL 缓存）`,
+    `curl -sS ${base}/v1/departments`,
   ].join('\n');
+}
+
+// ---- 部门（数据来自组织架构服务，本中心只取回来透出） ----
+// 服务契约的「部门」属性以**组织架构服务**（organization）为权威：
+// 本中心不维护部门，只把组织接口的 `GET /api/v1/departments` 目录取回来，供
+// ① 登记/编辑表单的下拉 ② 服务目录按部门过滤 ③ 卡片与检索结果展示 用。
+//
+// 下拉选项的 key 用 `id:<部门ID>` / `name:<部门名>`（而不是下标），
+// 这样"只有名字"的部门（组织接口不可达时按声明值保存的）也不会在下拉里丢掉，
+// 重新渲染（自动刷新每 3s）时用户的选择也不会被重置。
+let deptCatalog = { departments: [], loaded: false };
+
+function deptText(d) {
+  const id = String((d && d.id) || '').trim();
+  const name = String((d && d.name) || '').trim();
+  if (id && name) return `${name}（${id}）`;
+  return name || id;
+}
+
+// deptByKey 把下拉的 key 还原成 {id, name}：key 里带的就是权威值，不查目录也能还原。
+function deptByKey(key) {
+  const k = String(key || '');
+  if (k.startsWith('id:')) {
+    const id = k.slice(3);
+    const hit = (deptCatalog.departments || []).find((d) => String(d.id || '').trim() === id);
+    return { id, name: (hit && String(hit.name || '').trim()) || '' };
+  }
+  if (k.startsWith('name:')) return { id: '', name: k.slice(5) };
+  return null;
+}
+
+// 一个服务归属的部门：ID 优先（跨改名稳定），其次名字。
+function svcDeptKey(svc) {
+  const id = String((svc && svc.departmentId) || '').trim();
+  const name = String((svc && svc.departmentName) || '').trim();
+  if (id) return 'id:' + id;
+  if (name) return 'name:' + name;
+  return '';
+}
+
+function svcDeptMatches(svc, key) {
+  if (!key) return true;
+  const d = deptByKey(key);
+  if (!d) return true;
+  if (d.id) return String(svc.departmentId || '').trim() === d.id;
+  return String(svc.departmentName || '').trim() === d.name;
+}
+
+function deptTag(svc) {
+  // 卡片上显示**这个服务自己存的**部门（ID + 名称），不查目录：
+  // 目录可能暂时取不到，但"它登记的是哪个部门"是事实，必须照实显示。
+  const label = deptText({ id: svc && svc.departmentId, name: svc && svc.departmentName });
+  if (!label) return '';
+  return `<span class="tag" title="${esc(`归属部门：${label}（数据来自组织接口，非本中心自编）`)}">部门:${esc(label)}</span>`;
+}
+
+// loadDepartments 拉一次部门目录。force=true 时带 ?refresh=1 跳过服务端 TTL 缓存。
+// 刻意不抛异常：组织接口不可达时目录里会带上 error/available，面板照常可用。
+async function loadDepartments(force) {
+  const res = await api('/v1/departments' + (force ? '?refresh=1' : ''));
+  if (!res.ok || !res.data || typeof res.data !== 'object') {
+    deptCatalog = {
+      departments: [], loaded: true, enabled: true, available: false,
+      error: res.ok ? '响应不是 JSON 目录' : errText(res.data),
+    };
+    return deptCatalog;
+  }
+  const cat = res.data;
+  cat.departments = Array.isArray(cat.departments) ? cat.departments : [];
+  cat.loaded = true;
+  deptCatalog = cat;
+  return cat;
+}
+
+// deptChoices 把"组织接口里的部门"和"服务契约上实际用到的部门"合成候选：
+// 后者是为了不让组织接口不可达时按声明值保存的部门从界面上消失（否则编辑时会被清掉）。
+function deptChoices(services) {
+  const map = new Map();
+  const add = (id, name) => {
+    id = String(id || '').trim();
+    name = String(name || '').trim();
+    if (!id && !name) return;
+    const key = id ? 'id:' + id : 'name:' + name;
+    const cur = map.get(key);
+    if (!cur) { map.set(key, { key, id, name }); return; }
+    if (!cur.name && name) cur.name = name; // 同一个 ID 在别处带了名字，补上
+    if (!cur.id && id) cur.id = id;
+  };
+  (deptCatalog.departments || []).forEach((d) => add(d.id, d.name));
+  (services || []).forEach((s) => add(s.departmentId, s.departmentName));
+  return [...map.values()].sort((a, b) => deptText(a).localeCompare(deptText(b), 'zh'));
+}
+
+// fillDeptSelects 刷新三处下拉（表单 / 服务目录过滤 / API 检索过滤），
+// 并尽量保留用户当前的选择（选项没变时下拉内容不变）。
+function fillDeptSelects(services) {
+  const choices = deptChoices(services);
+  const opts = choices.map((c) => `<option value="${esc(c.key)}">${esc(deptText(c))}</option>`).join('');
+  const fill = (sel, emptyText) => {
+    if (!sel) return;
+    const keep = sel.value;
+    sel.innerHTML = `<option value="">${esc(emptyText)}</option>` + opts;
+    sel.value = choices.some((c) => c.key === keep) ? keep : '';
+  };
+  fill($('#svc-form-dept'), '（不指定部门）');
+  fill($('#svc-dept-filter'), '全部部门');
+  fill($('#api-dept'), '全部部门');
+}
+
+// renderDeptNote 把"部门目录的成色"写在表单里：
+// 下拉为空时用户至少能看到是"没配置组织接口"还是"组织接口暂时不可达"。
+function renderDeptNote() {
+  const node = $('#svc-form-dept-note');
+  if (!node) return;
+  const c = deptCatalog;
+  const n = (c.departments || []).length;
+  const say = (msg, warn) => {
+    node.textContent = msg;
+    node.className = 'note grow' + (warn ? ' note--warn' : '');
+  };
+  if (!c.enabled) {
+    say('组织接口未配置（REGISTRY_ORG_URL）：部门只当标签保存，不做对齐。', true);
+    return;
+  }
+  if (c.available) {
+    say(`已从组织接口同步 ${n} 个部门${c.cached ? '（缓存）' : ''}`
+      + (c.url ? ` · ${c.url}` : '')
+      + (c.fetchedAt ? ` · ${fmtTime(c.fetchedAt)}` : ''));
+    return;
+  }
+  say(`组织接口暂时不可达：${c.error || '未知原因'}`
+    + (n ? `；下面用的是上次同步的 ${n} 个部门（stale）` : '；此时部门按声明值保存，不影响登记'), true);
 }
 
 // ---- 服务目录 ----
 function serviceMatches(svc, filter) {
   if (!filter) return true;
-  const hay = [svc.namespace, svc.name, svc.description, svc.owner, svc.version, svc.gitRepoUrl]
+  const hay = [svc.namespace, svc.name, svc.description, svc.owner, svc.version, svc.gitRepoUrl,
+    svc.departmentName, svc.departmentId]
     .join(' ').toLowerCase();
   return hay.includes(filter.toLowerCase());
 }
@@ -206,16 +351,22 @@ async function renderServices() {
   if (!res.ok) { toast('读取服务列表失败：' + JSON.stringify(res.data), true); return; }
   const services = res.data.services || [];
 
+  // 部门目录（组织接口）——失败不影响列表，只影响下拉里能选什么。
+  await loadDepartments(false);
+  fillDeptSelects(services);
+
   const tagSelect = $('#svc-tag-filter');
   const tags = [...new Set(services.flatMap((s) => s.tags || []))].sort();
   const filter = $('#svc-filter').value.trim();
   const tagFilter = tagSelect.value;
+  const deptFilter = $('#svc-dept-filter').value;
   const shown = services.filter((s) =>
-    serviceMatches(s, filter) && (!tagFilter || (s.tags || []).includes(tagFilter)));
+    serviceMatches(s, filter) && (!tagFilter || (s.tags || []).includes(tagFilter))
+    && svcDeptMatches(s, deptFilter));
 
   // ① 数据与过滤条件都没变：直接返回，一行 DOM 都不动。
   //    （自动刷新每 3s 跑一次，早期这里是"重建整棵树"，于是展开的卡片被自动收起。）
-  const sig = JSON.stringify({ filter, tagFilter, tags, services });
+  const sig = JSON.stringify({ filter, tagFilter, deptFilter, tags, services });
   if (sig === lastServicesSig) return;
   lastServicesSig = sig;
 
@@ -265,6 +416,7 @@ function serviceCard(svc) {
     ${svc.description ? `<p class="item__desc">${esc(svc.description)}</p>` : ''}
     <div class="item__meta" style="margin-top:6px">
       ${tags}${protocols}${svc.owner ? `<span class="tag">owner:${esc(svc.owner)}</span>` : ''}
+      ${deptTag(svc)}
       ${svc.healthPath ? `<span class="tag">health:${esc(svc.healthPath)}</span>` : ''}
       ${svc.gitRepoUrl ? repoTag(svc.gitRepoUrl) : ''}
       ${svc.registeredBy ? `<span class="tag">来源:${esc(svc.registeredBy)}</span>` : ''}
@@ -404,10 +556,15 @@ async function renderSearch() {
   const method = $('#api-method').value;
   const path = $('#api-path').value.trim();
   const match = $('#api-match').value;
+  // 部门过滤的候选也来自组织接口；首次进这个页签时补一次目录。
+  if (!deptCatalog.loaded) { await loadDepartments(false); fillDeptSelects(lastServices); }
+  const dept = $('#api-dept').value;
   const qs = new URLSearchParams();
   if (method) qs.set('method', method);
   if (path) qs.set('path', path);
   if (match) qs.set('match', match);
+  const deptSel = deptByKey(dept);
+  if (deptSel && deptSel.id) qs.set('department', deptSel.id);
   const res = await api('/v1/search/apis?' + qs.toString());
   const box = $('#api-results');
   box.innerHTML = '';
@@ -418,19 +575,22 @@ async function renderSearch() {
     return;
   }
   box.appendChild(el('div', 'muted', `命中 ${matches.length} 条${res.data.hasMore ? '（还有更多）' : ''}`));
+  // 部门列只在真有数据时出现（绝大多数场景下没人给服务标部门，不必留一列空格子）。
+  const anyDept = matches.some((m) => m.departmentId || m.departmentName);
   const rows = matches.map((m) => `
     <tr>
       <td>${methodBadge(m.endpoint.method)}</td>
       <td class="mono">${esc(m.endpoint.path)}</td>
       <td class="mono">${esc(m.namespace)}/${esc(m.service)}</td>
       <td>${esc(m.serviceVersion || '')}</td>
+      ${anyDept ? `<td>${esc(deptText({ id: m.departmentId, name: m.departmentName }) || '—')}</td>` : ''}
       <td>${esc(m.instanceCount)}</td>
       <td><span class="badge badge--muted">${esc(m.matchType)}</span></td>
       <td>${esc(m.endpoint.summary || '')}</td>
     </tr>`).join('');
   const wrap = el('div', 'item');
   wrap.innerHTML = `<table>
-    <thead><tr><th>方法</th><th>登记的路径</th><th>服务</th><th>版本</th><th>实例</th><th>命中方式</th><th>说明</th></tr></thead>
+    <thead><tr><th>方法</th><th>登记的路径</th><th>服务</th><th>版本</th>${anyDept ? '<th>部门</th>' : ''}<th>实例</th><th>命中方式</th><th>说明</th></tr></thead>
     <tbody>${rows}</tbody></table>`;
   box.appendChild(wrap);
 }
@@ -711,12 +871,16 @@ function prefillSpecTemplate(force) {
 // openServiceForm(null) = 登记新服务；传服务对象 = 编辑（服务名不可改：它是身份）。
 async function openServiceForm(svc) {
   await fillNamespaceSelect(svc ? svc.namespace : undefined);
+  // 部门下拉：候选来自组织接口（上次拉到的目录即可，打开表单不额外出网）。
+  if (!deptCatalog.loaded) { await loadDepartments(false); }
+  fillDeptSelects(lastServices);
   const f = {
     ns: $('#svc-form-ns'), name: $('#svc-form-name'), version: $('#svc-form-version'),
     owner: $('#svc-form-owner'), health: $('#svc-form-health'), desc: $('#svc-form-desc'),
     tags: $('#svc-form-tags'), docs: $('#svc-form-docs'), repo: $('#svc-form-repo'),
-    specurl: $('#svc-form-specurl'), spec: $('#svc-form-spec'),
+    specurl: $('#svc-form-specurl'), spec: $('#svc-form-spec'), dept: $('#svc-form-dept'),
   };
+  renderDeptNote();
   if (svc) {
     $('#svc-form-title').textContent = `编辑服务契约 ${svc.namespace}/${svc.name}`;
     f.ns.value = svc.namespace;
@@ -727,6 +891,7 @@ async function openServiceForm(svc) {
     f.health.value = svc.healthPath || '';
     f.desc.value = svc.description || '';
     f.repo.value = svc.gitRepoUrl || '';
+    f.dept.value = svcDeptKey(svc);
     f.tags.value = (svc.tags || []).join(',');
     f.docs.value = (svc.api && svc.api.docsUrl) || '';
     f.specurl.value = (svc.api && svc.api.specUrl) || '';
@@ -743,6 +908,7 @@ async function openServiceForm(svc) {
     $('#svc-form-title').textContent = '登记服务契约';
     f.name.disabled = false;
     ['name', 'version', 'owner', 'health', 'desc', 'tags', 'docs', 'repo', 'specurl', 'spec'].forEach((k) => { f[k].value = ''; });
+    f.dept.value = '';
     setEpRows(null);
     setApiMode('spec');
     prefillSpecTemplate(true); // 预填最小模板：不粘贴 spec 也能直接提交成功
@@ -838,6 +1004,11 @@ async function submitServiceForm() {
     api: apiPart,
   };
   if (repo) body.gitRepoUrl = repo;
+  // 归属部门：只发下拉选中的那个（选中项就是权威值 —— 组织接口给的 ID/名称）。
+  // 不选 = 不带该字段，PUT 是整份覆盖，等于把部门清掉（与 gitRepoUrl 的语义一致）。
+  const deptSel = deptByKey($('#svc-form-dept').value);
+  if (deptSel && deptSel.id) body.departmentId = deptSel.id;
+  if (deptSel && deptSel.name) body.departmentName = deptSel.name;
   const tags = parseList($('#svc-form-tags').value);
   if (tags.length) body.tags = tags;
 
@@ -852,6 +1023,9 @@ async function submitServiceForm() {
     const endpoints = (res.data.service.api.endpoints || []).length;
     setHint(hint, '');
     toast(`已${res.data.created ? '登记' : '更新'} ${ns}/${name}（${endpoints} 个端点）`);
+    // 部门对齐的结果（"已按组织接口对齐" / "组织接口不可达，按声明值保存"）必须可见，
+    // 否则用户填了部门却不知道到底有没有对上。
+    if (res.data.departmentNote) toast(res.data.departmentNote);
     show(card, false);
     renderServices();
   });
@@ -957,8 +1131,10 @@ async function submitBatchForm() {
 $('#svc-refresh').addEventListener('click', renderServices);
 $('#svc-filter').addEventListener('input', renderServices);
 $('#svc-tag-filter').addEventListener('change', renderServices);
+$('#svc-dept-filter').addEventListener('change', renderServices);
 $('#api-search').addEventListener('click', renderSearch);
 $('#api-path').addEventListener('keydown', (e) => { if (e.key === 'Enter') renderSearch(); });
+$('#api-dept').addEventListener('change', renderSearch);
 $('#inst-refresh').addEventListener('click', renderInstances);
 $('#inst-service').addEventListener('change', renderInstances);
 $('#svc-new').addEventListener('click', () => openServiceForm(null));
@@ -968,6 +1144,17 @@ $('#svc-form-ep-add').addEventListener('click', () => $('#svc-form-eps tbody').a
 $('#svc-form-mode').addEventListener('change', (e) => setApiMode(e.target.value));
 $('#svc-form-spec-template').addEventListener('click', () => prefillSpecTemplate(true));
 $('#svc-form-name').addEventListener('input', () => prefillSpecTemplate(false));
+// 「重新同步部门」：强制跳过服务端 TTL 缓存重取组织接口的目录（组织服务刚建了新部门时用）。
+$('#svc-form-dept-refresh').addEventListener('click', async (e) => {
+  const btn = e.target;
+  await withBusy(btn, '同步中…', async () => {
+    const cat = await loadDepartments(true);
+    fillDeptSelects(lastServices);
+    renderDeptNote();
+    if (cat.enabled && cat.available) toast(`已从组织接口同步 ${(cat.departments || []).length} 个部门`);
+    else toast('部门目录暂时取不到：' + (cat.error || '组织接口不可达'), true);
+  });
+});
 $('#inst-new').addEventListener('click', openInstanceForm);
 $('#inst-form-cancel').addEventListener('click', () => show($('#inst-form-card'), false));
 $('#inst-form-submit').addEventListener('click', submitInstanceForm);

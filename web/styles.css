@@ -118,6 +118,7 @@ textarea:focus { outline: 1px solid var(--accent); }
 #svc-form-eps td { padding: 3px 6px; }
 #svc-form-eps input, #svc-form-eps select { width: 100%; }
 .note { color: var(--muted); font-size: 12px; }
+.note--warn { color: var(--warn, #d6a01e); }
 /* 表单校验提示：必须醒目 —— 曾经只有一个小灰字，看起来就是"点了没反应" */
 .hint { font-size: 12px; color: var(--muted); }
 .hint--error { color: var(--bad); font-weight: 600; }
