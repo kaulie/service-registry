@@ -157,13 +157,25 @@ function serviceMatches(svc, filter) {
   return hay.includes(filter.toLowerCase());
 }
 
-// 仓库地址在卡片上要短：去掉协议头与 scp 的 user@、结尾的 .git。
-// 例如 https://github.com/org/repo.git → github.com/org/repo，git@host:org/repo.git → host:org/repo
+// 仓库地址在卡片上要短：https://github.com/org/repo.git → github.com/org/repo；
+// scp 风格 git@github.com:org/repo.git → github.com/org/repo（host 后的冒号归一成斜杠，读起来一致）。
 function repoLabel(url) {
-  return String(url || '')
-    .replace(/^[A-Za-z][A-Za-z0-9+.-]*:\/\//, '')
-    .replace(/^[^@/\s]+@/, '')
-    .replace(/\.git$/, '');
+  const raw = String(url || '').replace(/\.git$/, '');
+  const scp = raw.match(/^[^@/\s]+@([^:/\s]+):(.+)$/);
+  if (scp) return `${scp[1]}/${scp[2]}`;
+  return raw.replace(/^[A-Za-z][A-Za-z0-9+.-]*:\/\//, '');
+}
+
+// 只有 http(s) 才做成可点链接：scp 风格（git@host:org/repo）和 ssh:// 浏览器打不开，
+// 硬做成 <a href> 会变成个坏链接（被当成相对路径）。其余照常显示，只是不可点（悬停看原文）。
+function repoIsClickable(url) { return /^https?:\/\//i.test(String(url || '')); }
+
+function repoTag(url) {
+  const title = `代码仓库：${esc(url)}`;
+  if (repoIsClickable(url)) {
+    return `<a class="tag tag--link" href="${esc(url)}" target="_blank" rel="noopener" title="${title}">repo:${esc(repoLabel(url))}</a>`;
+  }
+  return `<span class="tag" title="${title}（scp/ssh 地址：浏览器打不开，用 git clone）">repo:${esc(repoLabel(url))}</span>`;
 }
 
 let lastServices = [];
@@ -254,7 +266,7 @@ function serviceCard(svc) {
     <div class="item__meta" style="margin-top:6px">
       ${tags}${protocols}${svc.owner ? `<span class="tag">owner:${esc(svc.owner)}</span>` : ''}
       ${svc.healthPath ? `<span class="tag">health:${esc(svc.healthPath)}</span>` : ''}
-      ${svc.gitRepoUrl ? `<a class="tag tag--link" href="${esc(svc.gitRepoUrl)}" target="_blank" rel="noopener" title="代码仓库：${esc(svc.gitRepoUrl)}">repo:${esc(repoLabel(svc.gitRepoUrl))}</a>` : ''}
+      ${svc.gitRepoUrl ? repoTag(svc.gitRepoUrl) : ''}
       ${svc.registeredBy ? `<span class="tag">来源:${esc(svc.registeredBy)}</span>` : ''}
     </div>`;
 
@@ -349,7 +361,9 @@ function endpointsTable(endpoints, docsUrl, specUrl, svc) {
   const ns = encodeURIComponent(svc.namespace);
   const name = encodeURIComponent(svc.name);
   const links = [];
-  if (svc.gitRepoUrl) links.push(`<a href="${esc(svc.gitRepoUrl)}" target="_blank" rel="noopener" class="btn btn--small">代码仓库</a>`);
+  if (svc.gitRepoUrl && repoIsClickable(svc.gitRepoUrl)) {
+    links.push(`<a href="${esc(svc.gitRepoUrl)}" target="_blank" rel="noopener" class="btn btn--small">代码仓库</a>`);
+  }
   if (docsUrl) links.push(`<a href="${esc(docsUrl)}" target="_blank" rel="noopener" class="btn btn--small">API 文档</a>`);
   if (specUrl) links.push(`<a href="${esc(specUrl)}" target="_blank" rel="noopener" class="btn btn--small">外部 spec 链接</a>`);
   links.push(`<a href="/v1/namespaces/${ns}/services/${name}/spec" target="_blank" rel="noopener" class="btn btn--small">查看内联 spec</a>`);

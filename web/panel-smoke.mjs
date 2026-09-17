@@ -131,6 +131,13 @@ function collectDetails(node, out = []) {
   return out;
 }
 
+// 服务卡片是 class="item" 的 div：头部/标签挂在它的 innerHTML 里。
+function collectCards(node, out = []) {
+  if (node.className === 'item') out.push(node);
+  (node.children || []).forEach((c) => collectCards(c, out));
+  return out;
+}
+
 // 模拟用户点「展开」：<details> 的 open 由浏览器切换，然后派发 toggle 事件。
 async function userToggle(dom, details, open) {
   details.open = open;
@@ -283,6 +290,30 @@ const EVENT_CENTER = {
   },
 };
 
+async function scenarioRepoTagRendering() {
+  console.log('\n场景：服务卡片上的代码仓库标签（gitRepoUrl）');
+  const https = { ...EVENT_CENTER, gitRepoUrl: 'https://github.com/kaulie/event-center.git' };
+  const scp = { ...EVENT_CENTER, name: 'billing', gitRepoUrl: 'git@github.com:kaulie/billing.git' };
+  const dom = buildDom({ services: [https, scp] });
+  await click(dom, '#svc-refresh');
+  const cards = collectCards(dom.q('#svc-list'));
+  check(cards.length === 2, '两张卡片都渲染出来了（' + cards.length + '）');
+
+  const httpsCard = cards.find((c) => c.innerHTML.includes('event-center'));
+  check(!!httpsCard && httpsCard.innerHTML.includes('repo:github.com/kaulie/event-center'),
+    'https 仓库显示成短标签 repo:github.com/kaulie/event-center');
+  check(!!httpsCard && httpsCard.innerHTML.includes('<a class="tag tag--link" href="https://github.com/kaulie/event-center.git"'),
+    'https 仓库是可点的链接（href 是登记时的地址）');
+
+  const scpCard = cards.find((c) => c.innerHTML.includes('billing'));
+  check(!!scpCard && scpCard.innerHTML.includes('repo:github.com/kaulie/billing'),
+    'scp 风格也照样显示（repo:github.com/kaulie/billing）');
+  check(!!scpCard && !scpCard.innerHTML.includes('href="git@'),
+    'scp 风格不做成 href（否则就是个被当相对路径的坏链接）');
+  check(!!scpCard && scpCard.innerHTML.includes('title="代码仓库：git@github.com:kaulie/billing.git'),
+    '原文放在 title 里（悬停能看到、能复制）');
+}
+
 async function scenarioExpandedCardStaysOpen() {
   console.log('\n场景：点开「展开」后自动刷新（默认 3s）不得把卡片收起来');
   const dom = buildDom({ services: [EVENT_CENTER] });
@@ -326,6 +357,7 @@ for (const s of [
   scenarioSubmitWithoutSpec,
   scenarioInvalidName,
   scenarioInvalidGitRepoURL,
+  scenarioRepoTagRendering,
   scenarioSuccess,
   scenarioServerError,
   scenarioInstanceForm,
