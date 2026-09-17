@@ -32,6 +32,7 @@
   <nav class="tabs" id="tabs">
     <button class="tab tab--active" data-tab="overview">概览</button>
     <button class="tab" data-tab="services">服务目录</button>
+    <button class="tab" data-tab="tree">服务树</button>
     <button class="tab" data-tab="apis">API 检索</button>
     <button class="tab" data-tab="instances">实例</button>
     <button class="tab" data-tab="changes">变更与审计</button>
@@ -118,6 +119,24 @@
       </div>
 
       <div id="svc-list" class="list"></div>
+    </section>
+
+    <!-- 服务树 -->
+    <section id="tab-tree" class="tabpanel">
+      <div class="actions">
+        <input type="search" id="tree-filter" placeholder="过滤：部门 / 服务名 / namespace / owner / 标签" />
+        <button class="btn btn--small" id="tree-expand-all" type="button">全部展开</button>
+        <button class="btn btn--small" id="tree-collapse-all" type="button">全部收起</button>
+        <button class="btn" id="tree-refresh">刷新</button>
+        <span class="note grow" id="tree-note"></span>
+      </div>
+      <p class="note">
+        <b>默认收起</b>：点部门/服务前面的 <span class="tree__caret">▸</span> 展开该节点，再点一次收起；
+        部门多的时候先看骨架。展开状态<b>在自动刷新后保留</b>（当数据没变时面板连 DOM 都不重建），
+        多棵分支可以同时展开。「全部展开 / 全部收起」一次调整整棵树；过滤时命中的节点自动展开。
+        服务节点展开就是它的<b>对外 API 端点表</b>（带上代码仓库/spec 链接）。
+      </p>
+      <div id="tree-root" class="tree"></div>
     </section>
 
     <!-- API 检索 -->
