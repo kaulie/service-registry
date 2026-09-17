@@ -107,6 +107,9 @@ func (s *Store) migrate(ctx context.Context) error {
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("建表失败：%w", err)
 	}
+	if err := s.applyColumnMigrations(ctx); err != nil {
+		return err
+	}
 	return nil
 }
 

@@ -36,11 +36,11 @@ func (s *Store) UpsertService(ctx context.Context, in ServiceInput, actor string
 
 		if created {
 			if _, err := tx.ExecContext(ctx, `
-				INSERT INTO services (namespace, name, version, owner, description, tags, protocols,
+				INSERT INTO services (namespace, name, version, owner, description, git_repo_url, tags, protocols,
 				                      base_path, health_path, auth_schemes, docs_url, spec_url,
 				                      spec, spec_format, spec_hash, revision, created_at, updated_at, registered_by)
-				VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)`,
-				svc.Namespace, svc.Name, svc.Version, svc.Owner, svc.Description,
+				VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)`,
+				svc.Namespace, svc.Name, svc.Version, svc.Owner, svc.Description, svc.GitRepoURL,
 				encodeStrings(svc.Tags), encodeStrings(svc.API.Protocols), svc.BasePath, svc.HealthPath,
 				encodeAuthSchemes(svc.API.Auth), svc.API.DocsURL, svc.API.SpecURL,
 				string(in.SpecRaw), in.SpecFormat, in.SpecHash,
@@ -49,11 +49,12 @@ func (s *Store) UpsertService(ctx context.Context, in ServiceInput, actor string
 			}
 		} else {
 			if _, err := tx.ExecContext(ctx, `
-				UPDATE services SET version = ?, owner = ?, description = ?, tags = ?, protocols = ?,
+				UPDATE services SET version = ?, owner = ?, description = ?, git_repo_url = ?, tags = ?, protocols = ?,
 				       base_path = ?, health_path = ?, auth_schemes = ?, docs_url = ?, spec_url = ?,
 				       spec = ?, spec_format = ?, spec_hash = ?, updated_at = ?, registered_by = ?
 				 WHERE namespace = ? AND name = ?`,
-				svc.Version, svc.Owner, svc.Description, encodeStrings(svc.Tags), encodeStrings(svc.API.Protocols),
+				svc.Version, svc.Owner, svc.Description, svc.GitRepoURL,
+				encodeStrings(svc.Tags), encodeStrings(svc.API.Protocols),
 				svc.BasePath, svc.HealthPath, encodeAuthSchemes(svc.API.Auth), svc.API.DocsURL, svc.API.SpecURL,
 				string(in.SpecRaw), in.SpecFormat, in.SpecHash, formatTime(now), actor,
 				svc.Namespace, svc.Name); err != nil {

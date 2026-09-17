@@ -17,6 +17,7 @@ const (
 	maxMetadataLen = 64   // metadata 键值对数量上限
 	maxTagLen      = 64
 	maxTags        = 32
+	maxRepoURLLen  = 512 // gitRepoUrl（代码仓库地址）
 )
 
 var (
@@ -24,6 +25,11 @@ var (
 	nameRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9._-]{0,61}[a-z0-9])?$`)
 	// host：域名或 IP（IPv6 允许 [::1] 形式）。
 	hostRe = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$|^\[[0-9A-Fa-f:]+\]$`)
+	// gitRepoUrl 允许两种常见写法：
+	//   1) URL：https://github.com/org/repo(.git)、ssh://git@host:2222/org/repo.git、git://…、file://…
+	//   2) scp 风格：git@github.com:org/repo.git（直接把 `git remote -v` 抄过来就能用）
+	repoURLRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]*://\S+$`)
+	repoSCPRe = regexp.MustCompile(`^[^\s@/]+@[^\s:/]+:\S+$`)
 )
 
 var allowedSchemes = map[string]bool{"http": true, "https": true, "tcp": true, "tls": true}
@@ -41,6 +47,25 @@ func validateName(kind, v string) error {
 func validateText(kind, v string) error {
 	if utf8.RuneCountInString(v) > maxTextLen {
 		return fmt.Errorf("%s过长（上限 %d 字符）", kind, maxTextLen)
+	}
+	return nil
+}
+
+// validateGitRepoURL 校验代码仓库地址（可留空）。
+//
+// 刻意宽松：只要求"看起来是个仓库地址"，不要求域名/仓库真的可达 ——
+// 本中心只存元信息，不 clone、不抓取（和 docsUrl / specUrl 同一个原则）。
+func validateGitRepoURL(v string) error {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return nil
+	}
+	if utf8.RuneCountInString(v) > maxRepoURLLen {
+		return fmt.Errorf("gitRepoUrl 过长（上限 %d 字符）", maxRepoURLLen)
+	}
+	if !repoURLRe.MatchString(v) && !repoSCPRe.MatchString(v) {
+		return fmt.Errorf("gitRepoUrl 不合法：要仓库地址，例如 https://github.com/org/repo.git、"+
+			"ssh://git@host/org/repo.git 或 git@host:org/repo.git；当前值 %q", v)
 	}
 	return nil
 }

@@ -152,8 +152,18 @@ async function renderOverview() {
 // ---- 服务目录 ----
 function serviceMatches(svc, filter) {
   if (!filter) return true;
-  const hay = [svc.namespace, svc.name, svc.description, svc.owner, svc.version].join(' ').toLowerCase();
+  const hay = [svc.namespace, svc.name, svc.description, svc.owner, svc.version, svc.gitRepoUrl]
+    .join(' ').toLowerCase();
   return hay.includes(filter.toLowerCase());
+}
+
+// 仓库地址在卡片上要短：去掉协议头与 scp 的 user@、结尾的 .git。
+// 例如 https://github.com/org/repo.git → github.com/org/repo，git@host:org/repo.git → host:org/repo
+function repoLabel(url) {
+  return String(url || '')
+    .replace(/^[A-Za-z][A-Za-z0-9+.-]*:\/\//, '')
+    .replace(/^[^@/\s]+@/, '')
+    .replace(/\.git$/, '');
 }
 
 let lastServices = [];
@@ -244,6 +254,7 @@ function serviceCard(svc) {
     <div class="item__meta" style="margin-top:6px">
       ${tags}${protocols}${svc.owner ? `<span class="tag">owner:${esc(svc.owner)}</span>` : ''}
       ${svc.healthPath ? `<span class="tag">health:${esc(svc.healthPath)}</span>` : ''}
+      ${svc.gitRepoUrl ? `<a class="tag tag--link" href="${esc(svc.gitRepoUrl)}" target="_blank" rel="noopener" title="代码仓库：${esc(svc.gitRepoUrl)}">repo:${esc(repoLabel(svc.gitRepoUrl))}</a>` : ''}
       ${svc.registeredBy ? `<span class="tag">来源:${esc(svc.registeredBy)}</span>` : ''}
     </div>`;
 
@@ -338,6 +349,7 @@ function endpointsTable(endpoints, docsUrl, specUrl, svc) {
   const ns = encodeURIComponent(svc.namespace);
   const name = encodeURIComponent(svc.name);
   const links = [];
+  if (svc.gitRepoUrl) links.push(`<a href="${esc(svc.gitRepoUrl)}" target="_blank" rel="noopener" class="btn btn--small">代码仓库</a>`);
   if (docsUrl) links.push(`<a href="${esc(docsUrl)}" target="_blank" rel="noopener" class="btn btn--small">API 文档</a>`);
   if (specUrl) links.push(`<a href="${esc(specUrl)}" target="_blank" rel="noopener" class="btn btn--small">外部 spec 链接</a>`);
   links.push(`<a href="/v1/namespaces/${ns}/services/${name}/spec" target="_blank" rel="noopener" class="btn btn--small">查看内联 spec</a>`);
@@ -688,8 +700,8 @@ async function openServiceForm(svc) {
   const f = {
     ns: $('#svc-form-ns'), name: $('#svc-form-name'), version: $('#svc-form-version'),
     owner: $('#svc-form-owner'), health: $('#svc-form-health'), desc: $('#svc-form-desc'),
-    tags: $('#svc-form-tags'), docs: $('#svc-form-docs'), specurl: $('#svc-form-specurl'),
-    spec: $('#svc-form-spec'),
+    tags: $('#svc-form-tags'), docs: $('#svc-form-docs'), repo: $('#svc-form-repo'),
+    specurl: $('#svc-form-specurl'), spec: $('#svc-form-spec'),
   };
   if (svc) {
     $('#svc-form-title').textContent = `编辑服务契约 ${svc.namespace}/${svc.name}`;
@@ -700,6 +712,7 @@ async function openServiceForm(svc) {
     f.owner.value = svc.owner || '';
     f.health.value = svc.healthPath || '';
     f.desc.value = svc.description || '';
+    f.repo.value = svc.gitRepoUrl || '';
     f.tags.value = (svc.tags || []).join(',');
     f.docs.value = (svc.api && svc.api.docsUrl) || '';
     f.specurl.value = (svc.api && svc.api.specUrl) || '';
@@ -715,7 +728,7 @@ async function openServiceForm(svc) {
   } else {
     $('#svc-form-title').textContent = '登记服务契约';
     f.name.disabled = false;
-    ['name', 'version', 'owner', 'health', 'desc', 'tags', 'docs', 'specurl', 'spec'].forEach((k) => { f[k].value = ''; });
+    ['name', 'version', 'owner', 'health', 'desc', 'tags', 'docs', 'repo', 'specurl', 'spec'].forEach((k) => { f[k].value = ''; });
     setEpRows(null);
     setApiMode('spec');
     prefillSpecTemplate(true); // 预填最小模板：不粘贴 spec 也能直接提交成功
@@ -756,6 +769,15 @@ async function submitServiceForm() {
   const specurl = $('#svc-form-specurl').value.trim();
   if (docs) apiPart.docsUrl = docs;
   if (specurl) apiPart.specUrl = specurl;
+
+  // 代码仓库地址：本地先拦一道，错误直接指到字段（服务端也会校验，规则一致）。
+  const repoEl = $('#svc-form-repo');
+  const repo = repoEl.value.trim();
+  if (repo && !/^[A-Za-z][A-Za-z0-9+.-]*:\/\/\S+$/.test(repo) && !/^[^\s@/]+@[^\s:/]+:\S+$/.test(repo)) {
+    formFail(hint, 'gitRepoUrl 不合法：要仓库地址，例如 https://github.com/org/repo.git、' +
+      'ssh://git@host/org/repo.git 或 git@host:org/repo.git（本中心只存不克隆）', repoEl);
+    return;
+  }
 
   if ($('#svc-form-mode').value === 'spec') {
     const spec = specEl.value;
@@ -801,6 +823,7 @@ async function submitServiceForm() {
     healthPath: health,
     api: apiPart,
   };
+  if (repo) body.gitRepoUrl = repo;
   const tags = parseList($('#svc-form-tags').value);
   if (tags.length) body.tags = tags;
 

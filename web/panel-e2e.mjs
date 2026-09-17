@@ -87,6 +87,12 @@ const findAll = (node, key, out = []) => {
   (node.children || []).forEach((c) => findAll(c, key, out));
   return out;
 };
+// 服务卡片是 class="item" 的 div（它的头部/标签是一段 innerHTML 字符串）。
+const findCards = (node, out = []) => {
+  if (node.className === 'item') out.push(node);
+  (node.children || []).forEach((c) => findCards(c, out));
+  return out;
+};
 // 模拟用户点「展开 / 收起」：open 由浏览器切换，然后派发 toggle 事件。
 const toggle = async (details, open) => {
   details.open = open;
@@ -121,17 +127,36 @@ check(after[0] === first, '复用同一个节点（没重建、不闪、不丢�
 check(after[0].open === true, '自动刷新后依然是展开的 ← 本次修复点');
 
 if (WRITE) {
-  console.log('\n场景：真实数据变化（新登记一个服务）后，已展开的卡片不能被顺手收起');
-  const r = await fetch(BASE + '/v1/namespaces/default/services/payments', {
+  // 每次跑用一个新名字：写操作要能被重复执行（否则第二次跑"数据没变"就测不到重建路径了）。
+  const name = 'e2e-payments-' + Date.now().toString(36);
+  const repo = 'https://github.com/kaulie/' + name + '.git';
+  console.log('\n场景：真实数据变化（新登记 ' + name + '，带代码仓库）后，已展开的卡片不能被顺手收起');
+  const r = await fetch(BASE + '/v1/namespaces/default/services/' + name, {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ api: { spec: 'openapi: 3.0.3\ninfo:\n  title: payments\n  version: 1.0.0\npaths:\n  /pay:\n    post:\n      summary: 支付\n' } }),
+    body: JSON.stringify({
+      gitRepoUrl: repo,
+      api: { spec: 'openapi: 3.0.3\ninfo:\n  title: ' + name + '\n  version: 1.0.0\npaths:\n  /pay:\n    post:\n      summary: 支付\n' },
+    }),
   });
-  check(r.ok, '登记 default/payments（HTTP ' + r.status + '）');
+  check(r.ok, '登记 default/' + name + '（HTTP ' + r.status + '）');
   await click('#svc-refresh');
   const afterChange = findAll(q('#svc-list'), '<details>');
   check(afterChange.length === services.length + 1, '新服务出现在列表里（' + afterChange.length + ' 张卡片）');
-  check(afterChange[0].open === true, '数据变化后已展开的卡片仍保持展开');
+  // 注意列表按 namespace/name 排序，原卡片可能就不在第一个位置了 ——
+  // 这里断言"原来那个节点实例仍在列表里且仍然展开"，而新卡片是收起的。
+  check(afterChange.includes(first) && first.open === true, '数据变化后已展开的卡片仍保持展开');
+  check(afterChange.filter((d) => d.open).length === 1, '只有用户点开的那张是展开的，新卡片默认收起');
+
+  // gitRepoUrl 要能在卡片上直接看到（可点的 repo: 标签）
+  const card = findCards(q('#svc-list')).find((c) => c.innerHTML.includes(name));
+  check(!!card && card.innerHTML.includes('repo:github.com/kaulie/' + name),
+    '卡片上有可点的 repo: 标签：' + (card ? JSON.stringify((card.innerHTML.match(/repo:[^"<]*/) || [])[0]) : '(没找到卡片)'));
+  check(!!card && card.innerHTML.includes(repo), '标签的链接指向登记时的 gitRepoUrl');
+
+  // 收尾：删掉这次登记的服务，别把测试数据留在库里。
+  const del = await fetch(BASE + '/v1/namespaces/default/services/' + name, { method: 'DELETE' });
+  check(del.status === 204, '清理测试数据（HTTP ' + del.status + '）');
 }
 
 console.log('\n真实 API 请求数：' + apiCalls);

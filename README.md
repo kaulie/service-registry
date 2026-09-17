@@ -16,14 +16,14 @@
 
 | ✅ 本中心做什么 | ❌ 本中心不做什么 |
 |---|---|
-| 存储服务契约：身份、版本、owner、标签、**对外 API**（内联 OpenAPI 或显式端点）、文档链接 | **不探活**：不主动请求任何实例 |
+| 存储服务契约：身份、版本、owner、**代码仓库地址**、标签、**对外 API**（内联 OpenAPI 或显式端点）、文档链接 | **不探活**：不主动请求任何实例 |
 | 存储实例元信息：地址、端口、自定义 metadata、来源与时间 | **不心跳**：服务运行时与本中心零连接，不需要任何常驻客户端 |
 | 变更可追溯：全局递增 `revision` + 变更日志 + 审计（谁、何时、改了什么） | **不启停**任何进程（自愈是 watchdog 的职责，它可以拉我们的数据） |
 | 提供查询 / 反查 / 快照 / 增量游标 / SSE 实时订阅给所有平台 | **不保证可用性**：不返回"健康/up"状态，可达性由消费方自行校验 |
 | 独立控制面板（原生 HTML/CSS/JS，同端口托管） | 不做多节点集群/选主/federation（单实例、唯一真源） |
 
-契约里的 `healthPath` / `docsUrl` / `specUrl` **只是元信息字段**：本中心存着它们，
-供消费方或 watchdog 自行使用，本中心自己不会去访问。
+契约里的 `gitRepoUrl` / `healthPath` / `docsUrl` / `specUrl` **只是元信息字段**：本中心存着它们，
+供消费方或 watchdog 自行使用，本中心自己不会去访问（**不 clone 代码仓库**、不发任何请求）。
 
 ## 快速开始
 
@@ -62,6 +62,7 @@ curl -sS -X POST $B/v1/namespaces $J -H "$A" \
 curl -sS -X PUT $B/v1/namespaces/team-a/services/event-center $J -H "$A" -d @- <<'JSON'
 {
   "version": "1.4.2", "owner": "kaulie", "description": "统一事件中心",
+  "gitRepoUrl": "https://github.com/kaulie/event-center.git",
   "tags": ["events", "pubsub"], "healthPath": "/health",
   "api": {
     "protocols": ["http"],
@@ -102,7 +103,8 @@ curl -sS $B/v1/namespaces/team-a/services/event-center/spec -o openapi.yaml
 REGISTRY_TOKEN=rt_xxx client/register.sh \
   --service event-center --file api/openapi.yaml \
   --instance 10.0.0.7:9099 --instance 10.0.0.8:9099 \
-  --owner kaulie --version 1.4.2 --tag events
+  --owner kaulie --version 1.4.2 --tag events \
+  --git-repo https://github.com/kaulie/event-center.git   # 不传则取本地 remote.origin.url
 
 # 只更新契约 / 只更新实例
 client/register.sh --service event-center --file api/openapi.yaml
@@ -148,7 +150,7 @@ done
 | 页签 | 能力 |
 |---|---|
 | 概览 | 实时计数、当前 revision、语义边界、各拉取接口的可复制 curl |
-| 服务目录 | **「＋ 登记服务契约」**（粘贴 OpenAPI 或手工声明端点；默认预填最小模板）、**「编辑契约」**、**「＋ 加实例」**、服务卡片含 **API 端点表**（方法/路径/说明/标签/鉴权）+ 查看/下载内联 spec + 用真实实例生成调用示例；卡片可各自「展开/收起」，**自动刷新（3s）不会把已展开的卡片收起来**，多张卡片可以同时展开 |
+| 服务目录 | **「＋ 登记服务契约」**（粘贴 OpenAPI 或手工声明端点；默认预填最小模板）、**「编辑契约」**、**「＋ 加实例」**、服务卡片含 **API 端点表**（方法/路径/说明/标签/鉴权）+ 查看/下载内联 spec + 用真实实例生成调用示例；卡片可各自「展开/收起」，**自动刷新（3s）不会把已展开的卡片收起来**，多张卡片可以同时展开；契约可带 **gitRepoUrl（代码仓库）**，列表上直接显示可点的 `repo:` 标签 |
 | API 检索 | 按方法/路径（具体路径、模板、通配）反查提供方 |
 | 实例 | **「＋ 新增实例」**、**「声明式批量同步」**（贴 JSON 数组整组对齐）、地址/metadata/来源，注销单个实例 |
 | 变更与审计 | 按 revision 时间线回溯"谁改了什么" |
@@ -201,7 +203,7 @@ done
 | PUT | `/v1/namespaces/{ns}/services/{svc}/instances` | **声明式整组同步实例**（CI 首选） | 写 |
 | POST | `/v1/namespaces/{ns}/services/{svc}/instances` | 登记单个实例 | 写 |
 | PATCH/DELETE | `/v1/namespaces/{ns}/services/{svc}/instances/{id}` | 改/注销实例 | 写 |
-| GET | `/v1/services` | 服务目录（`tag`/`owner`/`protocol`/`q`/分页） | 读 |
+| GET | `/v1/services` | 服务目录（`tag`/`owner`/`protocol`/`q`/分页，`q` 也匹配 `gitRepoUrl`） | 读 |
 | GET | `/v1/instances/{id}` | 按实例 ID 全局查询 | 读 |
 | GET | `/v1/search/apis` | 反查"这个接口谁提供"（exact/template/glob） | 读 |
 | GET | `/v1/snapshot` | 全量快照（ETag / 304） | 读 |

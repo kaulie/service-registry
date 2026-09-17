@@ -22,7 +22,8 @@
 
 > 本中心返回的是**登记事实**（"谁声明了它存在、它的接口是什么"），
 > 不是**运行时事实**（"它现在活着吗"）。可达性由消费方自行校验；
-> 契约里的 `healthPath` 就是给消费方（或 watchdog）用的元信息字段。
+> 契约里的 `healthPath`、`gitRepoUrl` 就是给消费方（或 watchdog / 人）用的元信息字段
+> —— 本中心只存不碰（不 clone 仓库、不发任何请求）。
 
 **因此本服务只剩两件事要做扎实**：① 元信息模型要表达完整（尤其是"服务的基础属性"——
 对外 API）；② 元信息要能被可靠地、可增量地拉走。
@@ -33,7 +34,7 @@
 Namespace（隔离域）
   name · description · token_hash · created_at · updated_at
    └─ Service（契约，低频：发版时变）
-        identity : namespace · name · version · owner · tags[] · description
+        identity : namespace · name · version · owner · git_repo_url(仓库地址，仅元信息) · tags[] · description
         access   : basePath · healthPath(仅元信息) · docsUrl
         api      : protocols[] · authSchemes[] · specUrl · spec(内联原文) · specHash
                    · endpoints[]（method/path/summary/operationId/tags/auth）

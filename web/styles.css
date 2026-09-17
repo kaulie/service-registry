@@ -94,6 +94,9 @@ td.mono, .mono { font-family: var(--mono); }
 .code--log { max-height: 460px; }
 
 .tag { display: inline-block; font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 0 6px; margin-right: 4px; }
+a.tag { text-decoration: none; }
+a.tag--link { color: var(--accent); border-color: #2b5b8c; }
+a.tag--link:hover { text-decoration: underline; }
 .method { font-family: var(--mono); font-size: 11px; font-weight: 700; }
 .method--GET { color: #4aa3ff; } .method--POST { color: #35c07f; }
 .method--PUT { color: #e2b33c; } .method--PATCH { color: #c07ae2; }

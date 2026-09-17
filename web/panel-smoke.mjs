@@ -156,6 +156,7 @@ function fillServiceForm(dom, over = {}) {
   dom.q('#svc-form-name').value = 'my-service';
   dom.q('#svc-form-mode').value = 'spec';
   dom.q('#svc-form-spec').value = 'openapi: 3.0.3\npaths:\n  /health:\n    get: {}\n';
+  dom.q('#svc-form-repo').value = 'https://github.com/kaulie/my-service.git';
   Object.entries(over).forEach(([k, v]) => { dom.q(k).value = v; });
 }
 
@@ -168,6 +169,27 @@ async function scenarioFormOpensWithTemplate() {
   check(n === 1, '“登记服务契约”按钮注册了 click 处理器');
   check(dom.q('#svc-form-card').hidden === false, '表单已展开');
   check(dom.q('#svc-form-spec').value.includes('openapi: 3.0.3'), 'API 原文已预填最小模板（不粘贴 spec 也能提交成功）');
+  check(dom.q('#svc-form-repo').value === '', '新登记时代码仓库输入框是空的（这个字段可选）');
+}
+
+async function scenarioInvalidGitRepoURL() {
+  console.log('\n场景：代码仓库地址写成了简写/本地路径');
+  const dom = buildDom();
+  fillServiceForm(dom, { '#svc-form-repo': 'github.com/kaulie/my-service' });
+  await click(dom, '#svc-form-submit');
+  const hint = dom.q('#svc-form-hint');
+  check(String(hint.textContent).includes('gitRepoUrl'), '提示点名字段：' + JSON.stringify(hint.textContent));
+  check(dom.q('#svc-form-repo')._errors.includes('field-error'), '标红了代码仓库输入框');
+  check(dom.requests.filter((r) => r.method === 'PUT').length === 0, '本地就拦住了，不发请求');
+
+  // scp 风格（git remote -v 直接抄）要放行
+  const ok = buildDom();
+  fillServiceForm(ok, { '#svc-form-repo': 'git@github.com:kaulie/my-service.git' });
+  await click(ok, '#svc-form-submit');
+  const puts = ok.requests.filter((r) => r.method === 'PUT');
+  check(puts.length === 1, 'scp 风格地址可以正常提交');
+  check(JSON.parse(puts[0].body).gitRepoUrl === 'git@github.com:kaulie/my-service.git',
+    '请求体里带上了 gitRepoUrl：' + (puts[0] ? puts[0].body : '(无)'));
 }
 
 async function scenarioSubmitWithoutSpec() {
@@ -303,6 +325,7 @@ for (const s of [
   scenarioFormOpensWithTemplate,
   scenarioSubmitWithoutSpec,
   scenarioInvalidName,
+  scenarioInvalidGitRepoURL,
   scenarioSuccess,
   scenarioServerError,
   scenarioInstanceForm,

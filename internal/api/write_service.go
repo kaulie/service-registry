@@ -17,6 +17,7 @@ type serviceWrite struct {
 	Version     string   `json:"version"`
 	Owner       string   `json:"owner"`
 	Description string   `json:"description"`
+	GitRepoURL  string   `json:"gitRepoUrl"`
 	Tags        []string `json:"tags"`
 	BasePath    string   `json:"basePath"`
 	HealthPath  string   `json:"healthPath"`
@@ -85,6 +86,7 @@ func buildServiceInput(nsName, svcName string, body serviceWrite) (store.Service
 		Version:     strings.TrimSpace(body.Version),
 		Owner:       strings.TrimSpace(body.Owner),
 		Description: body.Description,
+		GitRepoURL:  strings.TrimSpace(body.GitRepoURL),
 		Tags:        trimAll(body.Tags),
 		BasePath:    strings.TrimSpace(body.BasePath),
 		HealthPath:  strings.TrimSpace(body.HealthPath),
@@ -139,6 +141,9 @@ func validateServiceWrite(body *serviceWrite, maxSpecBytes int) error {
 	}
 	if utf8Len(body.Owner) > 128 {
 		return errString("owner 过长（上限 128 字符）")
+	}
+	if err := validateGitRepoURL(body.GitRepoURL); err != nil {
+		return err
 	}
 	if utf8Len(body.BasePath) > 256 {
 		return errString("basePath 过长（上限 256 字符）")

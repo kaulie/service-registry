@@ -86,6 +86,7 @@ type EndpointMatch struct {
 	Service        string         `json:"service"`
 	ServiceVersion string         `json:"serviceVersion,omitempty"`
 	Description    string         `json:"description,omitempty"`
+	GitRepoURL     string         `json:"gitRepoUrl,omitempty"`
 	InstanceCount  int            `json:"instanceCount"`
 	MatchType      string         `json:"matchType"` // exact | template | glob
 	Endpoint       model.Endpoint `json:"endpoint"`
@@ -118,7 +119,7 @@ func (s *Store) SearchEndpoints(ctx context.Context, f EndpointFilter) ([]Endpoi
 	args = append(args, maxSearchCandidates)
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT e.namespace, e.service, e.method, e.path, e.summary, e.operation_id, e.tags, e.auth,
-		       COALESCE(sv.version, ''), COALESCE(sv.description, ''),
+		       COALESCE(sv.version, ''), COALESCE(sv.description, ''), COALESCE(sv.git_repo_url, ''),
 		       (SELECT COUNT(1) FROM instances i WHERE i.namespace = e.namespace AND i.service = e.service)
 		FROM endpoints e LEFT JOIN services sv ON sv.namespace = e.namespace AND sv.name = e.service
 		`+where+`
@@ -138,7 +139,7 @@ func (s *Store) SearchEndpoints(ctx context.Context, f EndpointFilter) ([]Endpoi
 		)
 		if err := rows.Scan(&m.Namespace, &m.Service, &m.Endpoint.Method, &m.Endpoint.Path,
 			&m.Endpoint.Summary, &m.Endpoint.OperationID, &tags, &authStr,
-			&m.ServiceVersion, &m.Description, &m.InstanceCount); err != nil {
+			&m.ServiceVersion, &m.Description, &m.GitRepoURL, &m.InstanceCount); err != nil {
 			return nil, false, err
 		}
 		m.Endpoint.Tags = decodeStrings(tags)
@@ -146,7 +147,7 @@ func (s *Store) SearchEndpoints(ctx context.Context, f EndpointFilter) ([]Endpoi
 		if f.Tag != "" && !contains(m.Endpoint.Tags, f.Tag) {
 			continue
 		}
-		if f.Query != "" && !matchQuery(f.Query, m.Service, m.Description, m.Endpoint.Summary, m.Endpoint.Path) {
+		if f.Query != "" && !matchQuery(f.Query, m.Service, m.Description, m.GitRepoURL, m.Endpoint.Summary, m.Endpoint.Path) {
 			continue
 		}
 		ok, kind := matcher.match(m.Endpoint.Path)

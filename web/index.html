@@ -53,7 +53,7 @@
     <section id="tab-services" class="tabpanel">
       <div class="actions">
         <button class="btn btn--primary" id="svc-new">＋ 登记服务契约</button>
-        <input type="search" id="svc-filter" placeholder="过滤：名字 / 描述 / owner / version" />
+        <input type="search" id="svc-filter" placeholder="过滤：名字 / 描述 / owner / version / 仓库" />
         <select id="svc-tag-filter"><option value="">全部标签</option></select>
         <button class="btn" id="svc-refresh">刷新</button>
       </div>
@@ -71,6 +71,7 @@
           <label class="grow">描述 <input type="text" id="svc-form-desc" placeholder="一句话说明这个服务是干什么的" /></label>
           <label class="grow">标签（逗号分隔） <input type="text" id="svc-form-tags" placeholder="events,pubsub" /></label>
           <label class="grow">文档链接 <input type="text" id="svc-form-docs" placeholder="https://…" /></label>
+          <label class="grow">代码仓库 gitRepoUrl <input type="text" id="svc-form-repo" placeholder="https://github.com/org/repo.git 或 git@host:org/repo.git" /></label>
         </div>
         <div class="form-row">
           <label>API 来源
