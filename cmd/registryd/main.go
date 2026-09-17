@@ -85,7 +85,7 @@ func main() {
 	errc := make(chan error, 1)
 	go func() {
 		log.Info("service-registry 启动",
-			"addr", cfg.Addr(), "db", cfg.DBPath, "version", version,
+			"addr", cfg.Addr(), "portFrom", cfg.PortSource, "db", cfg.DBPath, "version", version,
 			"readAuthRequired", cfg.ReadAuthRequired, "defaultNamespace", cfg.DefaultNamespace)
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errc <- err

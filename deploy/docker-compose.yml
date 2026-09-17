@@ -15,14 +15,16 @@ services:
     image: service-registry:${REGISTRY_IMAGE_VERSION:-dev}
     container_name: service-registry
     environment:
-      REGISTRY_HTTP_ADDR: 0.0.0.0:4240
+      # 端口统一由 SERVICE_PORT 决定（想换：SERVICE_PORT=9000 docker compose up）
+      SERVICE_PORT: ${SERVICE_PORT:-4240}
+      REGISTRY_BIND: 0.0.0.0
       REGISTRY_DB_PATH: /data/registry.db
       REGISTRY_DEFAULT_NS: default
       REGISTRY_READ_AUTH: open
       REGISTRY_ADMIN_TOKEN: ${REGISTRY_ADMIN_TOKEN:-}
       REGISTRY_LOG_LEVEL: ${REGISTRY_LOG_LEVEL:-info}
     ports:
-      - "127.0.0.1:4240:4240"
+      - "127.0.0.1:${SERVICE_PORT:-4240}:${SERVICE_PORT:-4240}"
     volumes:
       - registry-data:/data
     restart: unless-stopped

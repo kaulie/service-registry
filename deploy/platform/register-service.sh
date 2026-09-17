@@ -10,6 +10,9 @@
 #   REGISTRY_SERVICE_PORT=4240 REGISTRY_RUNTIME_DIR=/Users/gaolei/runtime/service-registry \
 #     deploy/platform/register-service.sh
 #
+# 端口取值优先级：REGISTRY_SERVICE_PORT > SERVICE_PORT > 4240
+# （SERVICE_PORT 与 scripts/start.sh 读取的是同一个变量，登记与启动不会对不上）。
+#
 # 登记后即可在面板 http://localhost:4220/panel/ 里打包 / 部署，或用 API：
 #   curl -sS -X POST http://127.0.0.1:4220/api/deploy-notify \
 #        -H 'content-type: application/json' -d '{"serviceId":"service-registry"}'
@@ -21,7 +24,7 @@ set -euo pipefail
 REGISTRY_CONTROL_PLANE="${REGISTRY_CONTROL_PLANE:-http://127.0.0.1:4220}"
 REGISTRY_SERVICE_ID="${REGISTRY_SERVICE_ID:-service-registry}"
 REGISTRY_RUNTIME_DIR="${REGISTRY_RUNTIME_DIR:-/Users/gaolei/runtime/${REGISTRY_SERVICE_ID}}"
-REGISTRY_SERVICE_PORT="${REGISTRY_SERVICE_PORT:-4240}"
+REGISTRY_SERVICE_PORT="${REGISTRY_SERVICE_PORT:-${SERVICE_PORT:-4240}}"
 REGISTRY_GIT_REPO_URL="${REGISTRY_GIT_REPO_URL:-https://github.com/kaulie/service-registry}"
 REGISTRY_DEFAULT_BRANCH="${REGISTRY_DEFAULT_BRANCH:-main}"
 REGISTRY_SERVICE_NAME="${REGISTRY_SERVICE_NAME:-Service Registry (全局服务注册中心)}"
