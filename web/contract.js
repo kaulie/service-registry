@@ -299,9 +299,9 @@ function afterSaved(ns, name, created, hasSpec) {
     // 新建成功后这个页面就变成"编辑 X/Y"了：刷新不会再误建一个新的。
     try {
       history.replaceState(null, '', `contract.html?ns=${encodeURIComponent(ns)}&name=${encodeURIComponent(name)}`);
-      setPageTitle(`编辑服务契约 ${ns}/${name}`);
-      field('name').disabled = true;
-    } catch (_) { /* 无 history 环境（测试/沙箱）：忽略 */ }
+    } catch (_) { /* 无 history 的环境（测试/沙箱）：只影响地址栏，不影响功能 */ }
+    setPageTitle(`编辑服务契约 ${ns}/${name}`);
+    field('name').disabled = true;
     if (done.scrollIntoView) done.scrollIntoView({ block: 'nearest' });
   }
 }
