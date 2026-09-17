@@ -75,6 +75,9 @@ command -v python3 >/dev/null 2>&1 || { echo "需要 python3 来安全地拼 JSO
 
 AUTH=()
 [ -n "${REGISTRY_TOKEN}" ] && AUTH=(-H "Authorization: Bearer ${REGISTRY_TOKEN}")
+# 注意必须写成 ${AUTH[@]+"${AUTH[@]}"}：bash 3.2（macOS 默认）在 `set -u` 下对空数组用
+# "${AUTH[@]}" 会以 "unbound variable" 直接退出 —— 表现就是"不带令牌必崩"。
+# 展开为空时这条命令等于没传这个 header，语义不变。
 
 service_url="${REGISTRY_URL}/v1/namespaces/${NS}/services/${SERVICE}"
 
@@ -109,7 +112,7 @@ PY
   echo "==> 登记契约 ${NS}/${SERVICE}（内联规范 ${SPEC_FILE}）"
   code="$(curl -sS -o /tmp/registry-register-out.json -w '%{http_code}' \
     -X PUT "${service_url}" \
-    -H 'content-type: application/json' "${AUTH[@]}" \
+    -H 'content-type: application/json' ${AUTH[@]+"${AUTH[@]}"} \
     -d "${payload}")"
   if [ "${code}" != "200" ] && [ "${code}" != "201" ]; then
     echo "[错误] 契约登记失败（HTTP ${code}）：" >&2
@@ -145,7 +148,7 @@ PY
     echo "==> 声明式同步实例集合（${#INSTANCES[@]} 个）"
     code="$(curl -sS -o /tmp/registry-register-inst.json -w '%{http_code}' \
       -X PUT "${service_url}/instances" \
-      -H 'content-type: application/json' "${AUTH[@]}" \
+      -H 'content-type: application/json' ${AUTH[@]+"${AUTH[@]}"} \
       -d "${payload}")"
     if [ "${code}" != "200" ]; then
       echo "[错误] 实例同步失败（HTTP ${code}）：" >&2
