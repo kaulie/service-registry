@@ -108,11 +108,14 @@ type ServiceAPI struct {
 
 // Service 是服务契约（低频变更，发版时更新）。
 type Service struct {
-	Namespace    string     `json:"namespace"`
-	Name         string     `json:"name"`
-	Version      string     `json:"version,omitempty"`
-	Owner        string     `json:"owner,omitempty"`
-	Description  string     `json:"description,omitempty"`
+	Namespace   string `json:"namespace"`
+	Name        string `json:"name"`
+	Version     string `json:"version,omitempty"`
+	Owner       string `json:"owner,omitempty"`
+	Description string `json:"description,omitempty"`
+	// GitRepoURL 是代码仓库地址（元信息：本中心只存不 clone、不抓取，
+	// 消费方/看板/告警可以直接顺着它找到"这个服务的源码在哪"）。
+	GitRepoURL   string     `json:"gitRepoUrl,omitempty"`
 	Tags         []string   `json:"tags,omitempty"`
 	BasePath     string     `json:"basePath,omitempty"`
 	HealthPath   string     `json:"healthPath,omitempty"` // 元信息：消费方/看门狗可据此自行探活

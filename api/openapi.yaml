@@ -170,7 +170,7 @@ paths:
         - { in: query, name: tag, schema: { type: string } }
         - { in: query, name: owner, schema: { type: string } }
         - { in: query, name: protocol, schema: { type: string } }
-        - { in: query, name: q, schema: { type: string }, description: 关键字（名字/描述/owner/version） }
+        - { in: query, name: q, schema: { type: string }, description: 关键字（名字/描述/owner/version/仓库地址） }
         - { in: query, name: limit, schema: { type: integer, default: 200, maximum: 2000 } }
         - { in: query, name: offset, schema: { type: integer, default: 0 } }
       responses:
@@ -610,6 +610,9 @@ components:
         version: { type: string }
         owner: { type: string }
         description: { type: string }
+        gitRepoUrl:
+          type: string
+          description: 代码仓库地址（只存不 clone、不抓取；支持 https/ssh URL 与 git@host:org/repo.git 写法）
         tags: { type: array, items: { type: string } }
         basePath: { type: string }
         healthPath: { type: string, description: 元信息：消费方/看门狗可据此自行探活 }
@@ -627,6 +630,10 @@ components:
         version: { type: string }
         owner: { type: string }
         description: { type: string }
+        gitRepoUrl:
+          type: string
+          description: 代码仓库地址（可留空；只校验形状，不去访问）
+          example: https://github.com/kaulie/event-center.git
         tags: { type: array, items: { type: string } }
         basePath: { type: string }
         healthPath: { type: string, description: 必须以 / 开头 }
@@ -681,6 +688,7 @@ components:
         service: { type: string }
         serviceVersion: { type: string }
         description: { type: string }
+        gitRepoUrl: { type: string, description: 该服务的代码仓库地址（跟着命中一起返回，找源码不用再查一次） }
         instanceCount: { type: integer }
         matchType: { type: string, enum: [exact, template, glob] }
         endpoint: { $ref: '#/components/schemas/Endpoint' }

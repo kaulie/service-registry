@@ -11,6 +11,10 @@
 #       --instance 127.0.0.1:9099 --instance 10.0.0.7:9099 \
 #       --owner kaulie --version 1.4.2 --tag events
 #
+#   # 带上代码仓库地址（不传则默认取本地 git 的 remote.origin.url）
+#   client/register.sh --service event-center --file api/openapi.yaml \
+#       --git-repo https://github.com/kaulie/event-center.git
+#
 #   # 只登记契约 / 只登记实例：
 #   client/register.sh --service event-center --file api/openapi.yaml
 #   client/register.sh --service event-center --instance 127.0.0.1:9099 --no-contract
@@ -19,9 +23,10 @@
 #   REGISTRY_TOKEN=rt_xxx client/register.sh --service foo --file api/openapi.yaml
 #
 # 环境变量：
-#   REGISTRY_URL    注册中心地址（默认 http://127.0.0.1:4240）
-#   REGISTRY_TOKEN  写令牌（admin token 或该命名空间的 token）
-#   REGISTRY_NS     命名空间（默认 default）
+#   REGISTRY_URL      注册中心地址（默认 http://127.0.0.1:4240）
+#   REGISTRY_TOKEN    写令牌（admin token 或该命名空间的 token）
+#   REGISTRY_NS       命名空间（默认 default）
+#   REGISTRY_GIT_REPO 代码仓库地址（等价于 --git-repo；都不给时取 remote.origin.url）
 set -euo pipefail
 
 REGISTRY_URL="${REGISTRY_URL:-http://127.0.0.1:4240}"
@@ -34,6 +39,8 @@ VERSION=""
 OWNER=""
 DESCRIPTION=""
 HEALTH_PATH=""
+GIT_REPO="${REGISTRY_GIT_REPO:-}"
+NO_GIT_REPO=0
 SCHEME="http"
 INSTANCES=()
 TAGS=()
@@ -41,7 +48,7 @@ NO_CONTRACT=0
 NO_INSTANCES=0
 
 usage() {
-  sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,29p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 
@@ -55,6 +62,8 @@ while [ $# -gt 0 ]; do
     --owner)        OWNER="${2:?}"; shift 2 ;;
     --description)  DESCRIPTION="${2:?}"; shift 2 ;;
     --health-path)  HEALTH_PATH="${2:?}"; shift 2 ;;
+    --git-repo)     GIT_REPO="${2:?}"; shift 2 ;;
+    --no-git-repo)  NO_GIT_REPO=1; shift ;;
     --scheme)       SCHEME="${2:?}"; shift 2 ;;
     --ns)           NS="${2:?}"; shift 2 ;;
     --url)          REGISTRY_URL="${2:?}"; shift 2 ;;
@@ -73,8 +82,22 @@ if [ "${NO_CONTRACT}" -eq 0 ] && [ -z "${SPEC_FILE}" ]; then
 fi
 command -v python3 >/dev/null 2>&1 || { echo "需要 python3 来安全地拼 JSON" >&2; exit 1; }
 
+# 仓库地址：显式参数/环境变量优先；没给就从当前 git 仓库的 remote.origin.url 推断
+# （CI 里通常就是它自己，省一次手填），并打印出来便于核对；--no-git-repo 可关闭推断。
+if [ "${NO_CONTRACT}" -eq 0 ] && [ -z "${GIT_REPO}" ] && [ "${NO_GIT_REPO}" -eq 0 ]; then
+  INFERRED="$(git config --get remote.origin.url 2>/dev/null || true)"
+  if [ -n "${INFERRED}" ]; then
+    GIT_REPO="${INFERRED}"
+    echo "==> gitRepoUrl 取自本地 remote.origin.url：${GIT_REPO}"
+    echo "    （覆盖用 --git-repo，想留空用 --no-git-repo）"
+  fi
+fi
+
 AUTH=()
 [ -n "${REGISTRY_TOKEN}" ] && AUTH=(-H "Authorization: Bearer ${REGISTRY_TOKEN}")
+# 注意必须写成 ${AUTH[@]+"${AUTH[@]}"}：bash 3.2（macOS 默认）在 `set -u` 下对空数组用
+# "${AUTH[@]}" 会以 "unbound variable" 直接退出 —— 表现就是"不带令牌必崩"。
+# 展开为空时这条命令等于没传这个 header，语义不变。
 
 service_url="${REGISTRY_URL}/v1/namespaces/${NS}/services/${SERVICE}"
 
@@ -82,7 +105,7 @@ service_url="${REGISTRY_URL}/v1/namespaces/${NS}/services/${SERVICE}"
 if [ "${NO_CONTRACT}" -eq 0 ]; then
   [ -f "${SPEC_FILE}" ] || { echo "找不到规范文件：${SPEC_FILE}" >&2; exit 1; }
   payload="$(SERVICE="${SERVICE}" SPEC_FILE="${SPEC_FILE}" VERSION="${VERSION}" OWNER="${OWNER}" \
-             DESCRIPTION="${DESCRIPTION}" HEALTH_PATH="${HEALTH_PATH}" \
+             DESCRIPTION="${DESCRIPTION}" HEALTH_PATH="${HEALTH_PATH}" GIT_REPO="${GIT_REPO}" \
              TAGS="$(IFS=,; echo "${TAGS[*]:-}")" python3 - <<'PY'
 import json, os
 
@@ -97,6 +120,9 @@ def build():
     }
     if os.environ["HEALTH_PATH"]:
         body["healthPath"] = os.environ["HEALTH_PATH"]
+    # 注意只在非空时带上：PUT 是整份契约覆盖，带上空值会把已有仓库地址清掉。
+    if os.environ.get("GIT_REPO"):
+        body["gitRepoUrl"] = os.environ["GIT_REPO"]
     tags = [t for t in os.environ.get("TAGS", "").split(",") if t]
     if tags:
         body["tags"] = tags
@@ -109,7 +135,7 @@ PY
   echo "==> 登记契约 ${NS}/${SERVICE}（内联规范 ${SPEC_FILE}）"
   code="$(curl -sS -o /tmp/registry-register-out.json -w '%{http_code}' \
     -X PUT "${service_url}" \
-    -H 'content-type: application/json' "${AUTH[@]}" \
+    -H 'content-type: application/json' ${AUTH[@]+"${AUTH[@]}"} \
     -d "${payload}")"
   if [ "${code}" != "200" ] && [ "${code}" != "201" ]; then
     echo "[错误] 契约登记失败（HTTP ${code}）：" >&2
@@ -145,7 +171,7 @@ PY
     echo "==> 声明式同步实例集合（${#INSTANCES[@]} 个）"
     code="$(curl -sS -o /tmp/registry-register-inst.json -w '%{http_code}' \
       -X PUT "${service_url}/instances" \
-      -H 'content-type: application/json' "${AUTH[@]}" \
+      -H 'content-type: application/json' ${AUTH[@]+"${AUTH[@]}"} \
       -d "${payload}")"
     if [ "${code}" != "200" ]; then
       echo "[错误] 实例同步失败（HTTP ${code}）：" >&2

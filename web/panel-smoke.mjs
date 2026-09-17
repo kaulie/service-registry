@@ -131,6 +131,13 @@ function collectDetails(node, out = []) {
   return out;
 }
 
+// 服务卡片是 class="item" 的 div：头部/标签挂在它的 innerHTML 里。
+function collectCards(node, out = []) {
+  if (node.className === 'item') out.push(node);
+  (node.children || []).forEach((c) => collectCards(c, out));
+  return out;
+}
+
 // 模拟用户点「展开」：<details> 的 open 由浏览器切换，然后派发 toggle 事件。
 async function userToggle(dom, details, open) {
   details.open = open;
@@ -156,6 +163,7 @@ function fillServiceForm(dom, over = {}) {
   dom.q('#svc-form-name').value = 'my-service';
   dom.q('#svc-form-mode').value = 'spec';
   dom.q('#svc-form-spec').value = 'openapi: 3.0.3\npaths:\n  /health:\n    get: {}\n';
+  dom.q('#svc-form-repo').value = 'https://github.com/kaulie/my-service.git';
   Object.entries(over).forEach(([k, v]) => { dom.q(k).value = v; });
 }
 
@@ -168,6 +176,27 @@ async function scenarioFormOpensWithTemplate() {
   check(n === 1, '“登记服务契约”按钮注册了 click 处理器');
   check(dom.q('#svc-form-card').hidden === false, '表单已展开');
   check(dom.q('#svc-form-spec').value.includes('openapi: 3.0.3'), 'API 原文已预填最小模板（不粘贴 spec 也能提交成功）');
+  check(dom.q('#svc-form-repo').value === '', '新登记时代码仓库输入框是空的（这个字段可选）');
+}
+
+async function scenarioInvalidGitRepoURL() {
+  console.log('\n场景：代码仓库地址写成了简写/本地路径');
+  const dom = buildDom();
+  fillServiceForm(dom, { '#svc-form-repo': 'github.com/kaulie/my-service' });
+  await click(dom, '#svc-form-submit');
+  const hint = dom.q('#svc-form-hint');
+  check(String(hint.textContent).includes('gitRepoUrl'), '提示点名字段：' + JSON.stringify(hint.textContent));
+  check(dom.q('#svc-form-repo')._errors.includes('field-error'), '标红了代码仓库输入框');
+  check(dom.requests.filter((r) => r.method === 'PUT').length === 0, '本地就拦住了，不发请求');
+
+  // scp 风格（git remote -v 直接抄）要放行
+  const ok = buildDom();
+  fillServiceForm(ok, { '#svc-form-repo': 'git@github.com:kaulie/my-service.git' });
+  await click(ok, '#svc-form-submit');
+  const puts = ok.requests.filter((r) => r.method === 'PUT');
+  check(puts.length === 1, 'scp 风格地址可以正常提交');
+  check(JSON.parse(puts[0].body).gitRepoUrl === 'git@github.com:kaulie/my-service.git',
+    '请求体里带上了 gitRepoUrl：' + (puts[0] ? puts[0].body : '(无)'));
 }
 
 async function scenarioSubmitWithoutSpec() {
@@ -261,6 +290,30 @@ const EVENT_CENTER = {
   },
 };
 
+async function scenarioRepoTagRendering() {
+  console.log('\n场景：服务卡片上的代码仓库标签（gitRepoUrl）');
+  const https = { ...EVENT_CENTER, gitRepoUrl: 'https://github.com/kaulie/event-center.git' };
+  const scp = { ...EVENT_CENTER, name: 'billing', gitRepoUrl: 'git@github.com:kaulie/billing.git' };
+  const dom = buildDom({ services: [https, scp] });
+  await click(dom, '#svc-refresh');
+  const cards = collectCards(dom.q('#svc-list'));
+  check(cards.length === 2, '两张卡片都渲染出来了（' + cards.length + '）');
+
+  const httpsCard = cards.find((c) => c.innerHTML.includes('event-center'));
+  check(!!httpsCard && httpsCard.innerHTML.includes('repo:github.com/kaulie/event-center'),
+    'https 仓库显示成短标签 repo:github.com/kaulie/event-center');
+  check(!!httpsCard && httpsCard.innerHTML.includes('<a class="tag tag--link" href="https://github.com/kaulie/event-center.git"'),
+    'https 仓库是可点的链接（href 是登记时的地址）');
+
+  const scpCard = cards.find((c) => c.innerHTML.includes('billing'));
+  check(!!scpCard && scpCard.innerHTML.includes('repo:github.com/kaulie/billing'),
+    'scp 风格也照样显示（repo:github.com/kaulie/billing）');
+  check(!!scpCard && !scpCard.innerHTML.includes('href="git@'),
+    'scp 风格不做成 href（否则就是个被当相对路径的坏链接）');
+  check(!!scpCard && scpCard.innerHTML.includes('title="代码仓库：git@github.com:kaulie/billing.git'),
+    '原文放在 title 里（悬停能看到、能复制）');
+}
+
 async function scenarioExpandedCardStaysOpen() {
   console.log('\n场景：点开「展开」后自动刷新（默认 3s）不得把卡片收起来');
   const dom = buildDom({ services: [EVENT_CENTER] });
@@ -303,6 +356,8 @@ for (const s of [
   scenarioFormOpensWithTemplate,
   scenarioSubmitWithoutSpec,
   scenarioInvalidName,
+  scenarioInvalidGitRepoURL,
+  scenarioRepoTagRendering,
   scenarioSuccess,
   scenarioServerError,
   scenarioInstanceForm,

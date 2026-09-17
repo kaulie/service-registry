@@ -91,9 +91,9 @@ func serviceWhere(f ServiceFilter) (string, []any) {
 		args = append(args, f.Protocol)
 	}
 	if f.Query != "" {
-		clauses = append(clauses, "(name LIKE ? OR description LIKE ? OR owner LIKE ? OR version LIKE ?)")
+		clauses = append(clauses, "(name LIKE ? OR description LIKE ? OR owner LIKE ? OR version LIKE ? OR git_repo_url LIKE ?)")
 		like := "%" + f.Query + "%"
-		args = append(args, like, like, like, like)
+		args = append(args, like, like, like, like, like)
 	}
 	if len(clauses) == 0 {
 		return "", nil
