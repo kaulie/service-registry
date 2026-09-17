@@ -37,7 +37,7 @@ function buildDom(scenario = {}) {
     const el = {
       _key: key,
       _errors: [],
-      value: '', textContent: '', innerHTML: '', className: '', title: '',
+      value: '', textContent: '', className: '', title: '',
       hidden: false, disabled: false, scrollTop: 0, scrollHeight: 0, open: false,
       dataset: {}, style: {}, children: [],
       classList: {
@@ -55,6 +55,13 @@ function buildDom(scenario = {}) {
       querySelectorAll: () => [],
       focus() {}, scrollIntoView() {}, setAttribute() {}, getAttribute() { return null; },
     };
+    // 真实 DOM 里 innerHTML = '' 会移除所有子节点（列表重建就是靠它），这里保持一致，
+    // 否则"重建列表"的断言会看到一堆本该被移除的旧节点。
+    let html = '';
+    Object.defineProperty(el, 'innerHTML', {
+      get: () => html,
+      set: (v) => { html = v; el.children.length = 0; },
+    });
     return el;
   }
   const q = (sel) => {
@@ -66,7 +73,7 @@ function buildDom(scenario = {}) {
     '/v1/namespaces': { body: { namespaces: [{ name: 'default', serviceCount: 0, instanceCount: 0 }], total: 1 } },
     '/health': { body: { status: 'ok', version: 'test' } },
     '/v1/meta': { body: { version: 'test', uptimeSeconds: 1, revision: 0, writeAuth: 'open', counts: { namespaces: 1, services: 0, instances: 0, endpoints: 0, changes: 0 } } },
-    '/v1/services': { body: { services: [], total: 0 } },
+    '/v1/services': { body: { services: scenario.services || [], total: (scenario.services || []).length } },
   };
 
   const sandbox = {
@@ -110,7 +117,27 @@ function buildDom(scenario = {}) {
 
   vm.createContext(sandbox);
   vm.runInContext(appJS, sandbox, { filename: 'app.js' });
-  return { sandbox, q, handlers, requests, windowEvents };
+  return {
+    sandbox, q, handlers, requests, windowEvents,
+    // 模拟"别的平台登记/下线了服务"：改完之后面板读到的是新数据。
+    setServices(list) { getResponses['/v1/services'].body = { services: list, total: list.length }; },
+  };
+}
+
+// 收集节点树里所有 <details>（服务卡片的「展开」）。
+function collectDetails(node, out = []) {
+  if (node._key === '<details>') out.push(node);
+  (node.children || []).forEach((c) => collectDetails(c, out));
+  return out;
+}
+
+// 模拟用户点「展开」：<details> 的 open 由浏览器切换，然后派发 toggle 事件。
+async function userToggle(dom, details, open) {
+  details.open = open;
+  for (const fn of dom.handlers.get('<details>|toggle') || []) {
+    const r = fn({ target: details });
+    if (r && typeof r.then === 'function') await r;
+  }
 }
 
 // 触发某个按钮上的 click 处理器（模拟用户点击），返回注册的处理器个数。
@@ -219,6 +246,58 @@ async function scenarioGlobalErrorHandlers() {
   check(evs.includes('unhandledrejection'), '注册了 unhandledrejection 处理器');
 }
 
+const EVENT_CENTER = {
+  namespace: 'default',
+  name: 'event-center',
+  version: '0.1.0',
+  revision: 1,
+  owner: 'kaulie',
+  instanceCount: 1,
+  updatedAt: '2026-09-17T01:00:00Z',
+  tags: ['events'],
+  api: {
+    hasSpec: true, specHash: 'a'.repeat(64), specBytes: 247, protocols: ['http'],
+    endpoints: [{ method: 'GET', path: '/health', summary: '健康检查' }],
+  },
+};
+
+async function scenarioExpandedCardStaysOpen() {
+  console.log('\n场景：点开「展开」后自动刷新（默认 3s）不得把卡片收起来');
+  const dom = buildDom({ services: [EVENT_CENTER] });
+  await click(dom, '#svc-refresh'); // 第一次渲染（等价于点开「服务目录」）
+  const first = collectDetails(dom.q('#svc-list'))[0];
+  check(!!first, '服务卡片里有「展开」节点');
+  check(first.open === false, '默认是收起的');
+  check(String(first.children[0].textContent).startsWith('展开：'),
+    '收起态文案是「展开：…」：' + JSON.stringify(first.children[0].textContent));
+
+  await userToggle(dom, first, true); // 用户点开
+  check(String(first.children[0].textContent).startsWith('收起：'),
+    '展开后文案变「收起：…」：' + JSON.stringify(first.children[0].textContent));
+  check(!!first.dataset.loaded, '展开时才去取调用示例（不重复取）');
+
+  // 自动刷新：数据没变 → 一行 DOM 都不动
+  await click(dom, '#svc-refresh');
+  const afterRefresh = collectDetails(dom.q('#svc-list'));
+  check(afterRefresh.length === 1, '没变的数据不重复插卡片（当前 ' + afterRefresh.length + ' 个）');
+  check(afterRefresh[0] === first, '还是同一个节点（没重建、没闪）');
+  check(afterRefresh[0].open === true, '自动刷新后依然是展开的 —— 就是本次修复的点');
+
+  // 数据变了（别的平台新登记了一个服务）：已展开的卡片不能被顺手收起来
+  dom.setServices([EVENT_CENTER, { ...EVENT_CENTER, name: 'other-service', revision: 1 }]);
+  await click(dom, '#svc-refresh');
+  const afterChange = collectDetails(dom.q('#svc-list'));
+  check(afterChange.length === 2, '新增的服务出现在列表里（' + afterChange.length + ' 张卡片）');
+  check(afterChange[0].open === true, '原有卡片即使被重建也保持展开');
+  check(afterChange[1].open === false, '新卡片默认收起，互不影响');
+
+  // 用户自己收起来：就不该再自动张开
+  await userToggle(dom, afterChange[0], false);
+  await click(dom, '#svc-refresh');
+  const afterCollapse = collectDetails(dom.q('#svc-list'));
+  check(afterCollapse[0].open === false, '用户手动收起的卡片保持收起（不擅自弹开）');
+}
+
 console.log('面板冒烟测试（web/panel-smoke.mjs）');
 for (const s of [
   scenarioFormOpensWithTemplate,
@@ -228,6 +307,7 @@ for (const s of [
   scenarioServerError,
   scenarioInstanceForm,
   scenarioGlobalErrorHandlers,
+  scenarioExpandedCardStaysOpen,
 ]) {
   await s();
 }

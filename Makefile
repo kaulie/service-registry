@@ -11,7 +11,7 @@ LDFLAGS   := -X main.version=$(VERSION)
 # 缓存落到那里会被下一次 rsync --delete 波及。
 BUILD_CACHE ?= $(TMPDIR)/service-registry-build-cache
 
-.PHONY: all build test race lint fmt fmt-check vet run clean docker panel-check panel-smoke help
+.PHONY: all build test race lint fmt fmt-check vet run clean docker panel-check panel-smoke panel-e2e help
 
 all: lint test panel-smoke build
 
@@ -49,6 +49,12 @@ panel-smoke: ## 面板交互冒烟：在受控 DOM 里模拟“填表→点提�
 	@if command -v node >/dev/null 2>&1; then node web/panel-smoke.mjs; \
 	else echo "skip: 未安装 node，跳过面板冒烟"; fi
 
+PANEL_BASE ?= http://127.0.0.1:4240
+
+panel-e2e: ## 面板端到端（需真实实例，默认只读）：验证服务卡片的展开状态不被自动刷新收起
+	@if command -v node >/dev/null 2>&1; then node web/panel-e2e.mjs $(PANEL_BASE); \
+	else echo "skip: 未安装 node，跳过面板端到端"; fi
+
 clean:
 	rm -rf bin outputs data
 
@@ -56,4 +62,4 @@ docker: ## 构建容器镜像
 	docker build -f deploy/Dockerfile --build-arg VERSION=$(VERSION) -t service-registry:$(VERSION) .
 
 help:
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "%-14s %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "%-14s %s\n", $$1, $$2}'

@@ -158,6 +158,18 @@ function serviceMatches(svc, filter) {
 
 let lastServices = [];
 
+// 自动刷新（默认 3s，见文件末尾的 setInterval）会反复重建列表。
+// 早期实现每次都把 #svc-list 整个换掉，于是用户刚点开的「展开：对外 API」会在下一次
+// 刷新时被自动收起来（症状：点开看两眼，自己合上了）。三件事一起保证"点开就一直开着"：
+//   ① lastServicesSig：数据 + 过滤条件没变就完全不碰 DOM（不闪、不丢滚动位置）；
+//   ② expandedServices：按 ns/name 记住用户点开的卡片，重建后照样是展开的；
+//   ③ serviceCards：数据没变的卡片直接复用原来的 DOM 节点（省一次实例请求，也不闪）。
+let lastServicesSig = null;
+const expandedServices = new Set();
+const serviceCards = new Map();
+
+function svcKey(svc) { return svc.namespace + '/' + svc.name; }
+
 function syncServiceSelect(services) {
   lastServices = services;
   const sel = $('#inst-service');
@@ -173,22 +185,38 @@ async function renderServices() {
   const services = res.data.services || [];
 
   const tagSelect = $('#svc-tag-filter');
-  const tags = new Set();
-  services.forEach((s) => (s.tags || []).forEach((t) => tags.add(t)));
-  const keep = tagSelect.value;
-  tagSelect.innerHTML = '<option value="">全部标签</option>' +
-    [...tags].sort().map((t) => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
-  tagSelect.value = tags.has(keep) ? keep : '';
-
+  const tags = [...new Set(services.flatMap((s) => s.tags || []))].sort();
   const filter = $('#svc-filter').value.trim();
   const tagFilter = tagSelect.value;
   const shown = services.filter((s) =>
     serviceMatches(s, filter) && (!tagFilter || (s.tags || []).includes(tagFilter)));
 
+  // ① 数据与过滤条件都没变：直接返回，一行 DOM 都不动。
+  //    （自动刷新每 3s 跑一次，早期这里是"重建整棵树"，于是展开的卡片被自动收起。）
+  const sig = JSON.stringify({ filter, tagFilter, tags, services });
+  if (sig === lastServicesSig) return;
+  lastServicesSig = sig;
+
+  const keep = tagSelect.value;
+  tagSelect.innerHTML = '<option value="">全部标签</option>' +
+    tags.map((t) => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
+  tagSelect.value = tags.includes(keep) ? keep : '';
+
   const box = $('#svc-list');
   box.innerHTML = '';
   box.appendChild(el('div', 'muted', `共 ${services.length} 个服务，显示 ${shown.length} 个`));
-  shown.forEach((svc) => box.appendChild(serviceCard(svc)));
+  // ③ 内容没变的卡片复用同一个节点（展开状态、调用示例都留在原地）。
+  const next = new Map();
+  shown.forEach((svc) => {
+    const key = svcKey(svc);
+    const cardSig = JSON.stringify(svc);
+    const prev = serviceCards.get(key);
+    const node = prev && prev.sig === cardSig ? prev.node : serviceCard(svc);
+    next.set(key, { sig: cardSig, node });
+    box.appendChild(node);
+  });
+  serviceCards.clear();
+  next.forEach((v, k) => serviceCards.set(k, v));
   syncServiceSelect(services);
 }
 
@@ -196,6 +224,7 @@ function serviceCard(svc) {
   const api = svc.api || {};
   const endpoints = api.endpoints || [];
   const card = el('div', 'item');
+  const key = svcKey(svc);
   const specBadge = api.hasSpec
     ? `<span class="badge badge--info">OpenAPI ${esc(shortHash(api.specHash))} · ${esc(api.specBytes)}B</span>`
     : '<span class="badge badge--warn">仅显式端点</span>';
@@ -219,15 +248,35 @@ function serviceCard(svc) {
     </div>`;
 
   const details = el('details');
-  details.innerHTML = `<summary>展开：对外 API（${endpoints.length} 个端点）与调用示例</summary>`;
+  const summary = el('summary');
+  const summaryTail = `对外 API（${endpoints.length} 个端点）与调用示例`;
+  const setSummary = (open) => { summary.textContent = (open ? '收起：' : '展开：') + summaryTail; };
+  setSummary(false);
+  details.appendChild(summary);
   const body = el('div', 'item__body');
   body.appendChild(endpointsTable(endpoints, api.docsUrl, api.specUrl, svc));
   details.appendChild(body);
-  details.addEventListener('toggle', async () => {
-    if (!details.open || details.dataset.loaded) return;
+
+  const loadExample = () => {
+    if (details.dataset.loaded) return Promise.resolve();
     details.dataset.loaded = '1';
-    await fillCallExample(body, svc, endpoints);
+    return fillCallExample(body, svc, endpoints);
+  };
+
+  details.addEventListener('toggle', () => {
+    setSummary(details.open);
+    if (details.open) {
+      expandedServices.add(key); // ② 记住"用户点开了它"，刷新后不要自动收起来
+      return loadExample();
+    }
+    expandedServices.delete(key);
   });
+  // ② 自动刷新重建过节点：按用户之前的操作恢复成展开，而不是一律收起。
+  if (expandedServices.has(key)) {
+    details.open = true;
+    setSummary(true);
+    loadExample();
+  }
   card.appendChild(details);
 
   const actions = el('div', 'actions');
