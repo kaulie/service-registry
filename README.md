@@ -148,6 +148,29 @@ curl -sS -X PUT http://127.0.0.1:4240/v1/namespaces/team-a/services/event-center
 # 按部门发现
 curl -sS 'http://127.0.0.1:4240/v1/services?department=D0001'
 curl -sS 'http://127.0.0.1:4240/v1/search/apis?method=GET&path=/health&department=D0001'
+
+# 按组织查服务列表（组织视角：org_id 就是契约上的 departmentId）
+curl -sS 'http://127.0.0.1:4240/v1/orgs/D0001/services'
+# → {"org":{"id":"D0001","name":"SRE部门","type":"研发","resolved":true,"note":"组织信息来自组织接口：SRE部门（D0001）"},
+#    "organization":{"enabled":true,"available":true,"cached":false,"stale":false,...},
+#    "services":[...],"total":2,"limit":200,"offset":0}
+```
+
+`GET /v1/orgs/{orgId}/services` 是**组织视角**的查询封装（比 `/v1/services?department=` 更明确）：
+
+| | 说明 |
+|---|---|
+| `org_id` | 就是契约上的 `departmentId`（组织接口里的部门 ID，如 `D0005`）；**只认 ID**，不认名称、不做模糊匹配（ID 稳定、名称会变）。要按名称/关键字找服务仍走 `?department=` / `?q=` |
+| 大小写 | ID 比较忽略 ASCII 大小写：`d0005` 与 `D0005` 是同一个组织 |
+| 附带信息 | 响应带 `org`（名称/类型/父部门，来自组织接口）与 `organization`（目录数据的成色：enabled/available/cached/stale/error），调用方不必再查一次部门目录 |
+| 过滤/分页 | 与 `/v1/services` 同款：`?namespace=` `?tag=` `?owner=` `?protocol=` `?q=` `?limit=` `?offset=` `?refresh=1`（强制出网刷新目录）；`total` 是"该组织下满足条件的总数"，不受分页影响 |
+| 组织接口挂了 | 依然 **200**：照常列出本中心按其 ID 登记的服务，用 `org.resolved=false` + `org.note` + `organization.error` 说明"没对上、原因是什么"（不因为另一个服务挂了就把查询判失败） |
+| 什么时候 404 | 只有「目录可用且非空 + ID 不在目录里 + 本中心也没有服务登记在它下面」三条同时成立才 404（事实清楚才报不存在）；否则会把"组织服务挂了"说成"这个组织不存在" |
+
+```bash
+# 组织视角的两个典型用法
+curl -sS 'http://127.0.0.1:4240/v1/orgs/D0005/services?limit=5'
+curl -sS 'http://127.0.0.1:4240/v1/orgs/D0001/services?namespace=team-a&tag=events'
 ```
 
 语义边界（刻意选的取舍）：
@@ -282,6 +305,7 @@ toast / 部门目录 / 表单反馈），各自只放自己的逻辑：
 | PATCH/DELETE | `/v1/namespaces/{ns}/services/{svc}/instances/{id}` | 改/注销实例 | 写 |
 | GET | `/v1/services` | 服务目录（`tag`/`owner`/`protocol`/`department`/`q`/分页，`q` 也匹配 `gitRepoUrl` 与部门） | 读 |
 | GET | `/v1/departments` | **部门目录**（数据来自组织架构服务，带 TTL 缓存与数据成色） | 读 |
+| GET | `/v1/orgs/{orgId}/services` | **按组织（部门）查服务列表**（`org_id` = 契约上的 `departmentId`；带组织信息与目录成色，只认 ID） | 读 |
 | GET | `/v1/instances/{id}` | 按实例 ID 全局查询 | 读 |
 | GET | `/v1/search/apis` | 反查"这个接口谁提供"（exact/template/glob，可加 `department`） | 读 |
 | GET | `/v1/snapshot` | 全量快照（ETag / 304） | 读 |

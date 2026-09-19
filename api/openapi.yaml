@@ -219,6 +219,46 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DepartmentCatalog' }
 
+  /v1/orgs/{orgId}/services:
+    get:
+      tags: [discover]
+      summary: 按组织（部门）查服务列表（`org_id` 即契约上的 `departmentId`）
+      description: |
+        **组织视角**的查询：这个组织（部门）里有哪些服务。
+
+        - `orgId` 就是服务契约上的 `departmentId` —— 组织架构服务（organization）里的
+          部门 ID（如 `D0005`），目录见 GET /v1/departments。
+        - **只认 ID**：不认名称、不做模糊匹配（ID 稳定，名称会变）。要按名称/关键字找服务，
+          用 `GET /v1/services?department=` 或 `?q=`。
+        - ID 比较忽略 ASCII 大小写：`d0005` 与 `D0005` 是同一个组织。
+        - 响应带上**这个组织是谁**（`org`：名称/类型/父部门，字段来自组织接口）与
+          **目录数据的成色**（`organization`：enabled/available/cached/stale/error），
+          调用方不必自己再查一次部门目录。
+        - 失败方向与 `/v1/departments` 一致：**组织接口挂了不影响这条查询** —— 依然 200，
+          照常列出本中心按其 ID 登记的服务，并用 `org.resolved` + `org.note` +
+          `organization.*` 说明"没对上、原因是什么"。只有「目录可用且非空 + ID 不在目录里
+          + 本中心也没有服务登记在它下面」三条同时成立才是 404（事实清楚才报不存在）。
+      parameters:
+        - in: path
+          name: orgId
+          required: true
+          schema: { type: string, example: D0005 }
+          description: 组织（部门）ID = 服务契约上的 departmentId
+        - { in: query, name: namespace, schema: { type: string }, description: 只看某个命名空间下的服务 }
+        - { in: query, name: tag, schema: { type: string } }
+        - { in: query, name: owner, schema: { type: string } }
+        - { in: query, name: protocol, schema: { type: string } }
+        - { in: query, name: q, schema: { type: string }, description: 关键字（名字/描述/owner/version/仓库地址/部门） }
+        - { in: query, name: limit, schema: { type: integer, default: 200, maximum: 2000 } }
+        - { in: query, name: offset, schema: { type: integer, default: 0 } }
+        - { in: query, name: refresh, schema: { type: boolean }, description: 强制出网刷新部门目录（跳过 TTL 缓存） }
+      responses:
+        '200':
+          description: 该组织下的服务列表 + 组织信息 + 部门目录成色
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/OrgServices' } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /v1/namespaces/{ns}/services:
     get:
       tags: [discover]
@@ -667,6 +707,40 @@ components:
         error: { type: string, description: 失败原因（available=false 时） }
         departments: { type: array, items: { $ref: '#/components/schemas/Department' } }
         types: { type: array, items: { type: string }, description: 部门类型候选（组织接口给出时） }
+
+    OrgServices:
+      type: object
+      description: |
+        按组织（部门）查到的服务列表 + 这个组织是谁 + 部门目录的成色。
+        `org.resolved` 说明 orgId 是否在组织接口的目录里对上了；没对上时 `org.note`
+        给出原因（目录里没有 / 组织接口不可达 / 未配置组织接口），服务列表照常返回。
+      properties:
+        org:
+          type: object
+          description: 本次查询的组织（部门）—— 字段来自组织接口，resolved=false 时只有 id 与 note
+          properties:
+            id: { type: string, example: D0005 }
+            name: { type: string, example: AI研发部 }
+            type: { type: string, example: 研发 }
+            parentId: { type: string, example: D0001, description: 组织接口给了就原样带出（本中心不做层级加工） }
+            resolved: { type: boolean, description: 这个 ID 是否在组织接口的部门目录里对上了 }
+            note: { type: string, description: 人类可读说明（对齐结果或没能对齐的原因） }
+        organization:
+          type: object
+          description: 部门目录这份数据的成色（与 GET /v1/departments 同源，不带 departments 列表）
+          properties:
+            enabled: { type: boolean }
+            available: { type: boolean }
+            cached: { type: boolean }
+            stale: { type: boolean }
+            url: { type: string }
+            path: { type: string, example: /api/v1/departments }
+            fetchedAt: { type: string, format: date-time }
+            error: { type: string, description: 组织接口不可达时的失败原因 }
+        services: { type: array, items: { $ref: '#/components/schemas/Service' } }
+        total: { type: integer, description: 该组织下满足过滤条件的服务总数（不受分页影响） }
+        limit: { type: integer }
+        offset: { type: integer }
 
     Service:
       type: object
