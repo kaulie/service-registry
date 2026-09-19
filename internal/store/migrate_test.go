@@ -21,8 +21,11 @@ func TestOpenMigratesLegacyServicesTable(t *testing.T) {
 
 	// 用"加列之前"的建表语句造一个老库。
 	legacy := strings.Replace(schema, "  git_repo_url  TEXT NOT NULL DEFAULT '',\n", "", 1)
+	legacy = strings.Replace(legacy, "  type          TEXT NOT NULL DEFAULT 'service',\n", "", 1)
+	legacy = strings.Replace(legacy, "  app_id        TEXT NOT NULL DEFAULT '',\n", "", 1)
+	legacy = strings.Replace(legacy, "  os            TEXT NOT NULL DEFAULT '',\n", "", 1)
 	if legacy == schema {
-		t.Fatal("schema 里已经没有 git_repo_url 这一行了，本测试的前提失效（请更新测试）")
+		t.Fatal("schema 里已经没有 git_repo_url/type/app_id/os 这些行了，本测试的前提失效（请更新测试）")
 	}
 	db, err := sql.Open("sqlite", "file:"+path)
 	if err != nil {
@@ -50,31 +53,35 @@ func TestOpenMigratesLegacyServicesTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("读取表结构失败：%v", err)
 	}
-	if !cols["git_repo_url"] {
-		t.Fatal("迁移没有给老库的 services 补上 git_repo_url 列")
+	for _, col := range []string{"git_repo_url", "type", "app_id", "os"} {
+		if !cols[col] {
+			t.Fatalf("迁移没有给老库的 services 补上 %s 列", col)
+		}
 	}
 
-	// 老数据还在，新列取默认值（空）。
+	// 老数据还在，新列取默认值（type=service，其余为空）。
 	svc, err := st.GetService(ctx, "legacy", "svc")
 	if err != nil {
 		t.Fatalf("读取老数据失败：%v", err)
 	}
-	if svc.GitRepoURL != "" {
-		t.Fatalf("老数据的新列应为空，实际 %q", svc.GitRepoURL)
+	if svc.GitRepoURL != "" || svc.Type != "service" || svc.AppID != "" || svc.OS != "" {
+		t.Fatalf("老数据的新列默认值不对：%+v", svc)
 	}
 
-	// 迁移后写入/读回都要正常。
+	// 迁移后写入/读回都要正常（含 app 类型字段）。
 	if _, _, err := st.UpsertService(ctx, ServiceInput{Service: model.Service{
-		Namespace: "legacy", Name: "svc", GitRepoURL: "https://github.com/kaulie/legacy.git",
+		Namespace: "legacy", Name: "svc", Type: "app", AppID: "app-001", OS: "iOS",
+		GitRepoURL: "https://github.com/kaulie/legacy.git",
 	}}, "tester"); err != nil {
-		t.Fatalf("写入 gitRepoUrl 失败：%v", err)
+		t.Fatalf("写入 gitRepoUrl/类型字段失败：%v", err)
 	}
 	svc, err = st.GetService(ctx, "legacy", "svc")
 	if err != nil {
 		t.Fatalf("读回失败：%v", err)
 	}
-	if svc.GitRepoURL != "https://github.com/kaulie/legacy.git" {
-		t.Fatalf("读回的 gitRepoUrl 不对：%q", svc.GitRepoURL)
+	if svc.GitRepoURL != "https://github.com/kaulie/legacy.git" ||
+		svc.Type != "app" || svc.AppID != "app-001" || svc.OS != "iOS" {
+		t.Fatalf("读回的 gitRepoUrl/类型字段不对：%+v", svc)
 	}
 
 	// 幂等：再开一次（迁移条目已生效）不能报错，数据不受影响。

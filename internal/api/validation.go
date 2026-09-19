@@ -20,7 +20,23 @@ const (
 	maxRepoURLLen  = 512 // gitRepoUrl（代码仓库地址）
 	maxDeptIDLen   = 64  // departmentId（组织接口里的部门 ID，如 D0001）
 	maxDeptNameLen = 128 // departmentName（部门名，中文也常见）
+	maxAppIDLen    = 128 // appId（app 型登记对象的稳定标识）
 )
+
+// 登记对象类型。
+const (
+	serviceTypeService = "service"
+	serviceTypeApp     = "app"
+)
+
+// allowedOS 把操作系统的各种大小写写法收敛到统一展示值。
+var allowedOS = map[string]string{
+	"android": "Android",
+	"ios":     "iOS",
+	"macos":   "MacOS",
+	"windows": "Windows",
+	"linux":   "Linux",
+}
 
 var (
 	// 命名空间/服务名：小写字母数字与 . _ -（与 DNS label 兼容，便于将来映射到网关/域名）。
@@ -94,6 +110,42 @@ func validateDeptField(kind, v string, max int) error {
 	for _, r := range v {
 		if r < 0x20 || r == 0x7f {
 			return fmt.Errorf("%s 不能包含控制字符（换行/制表符等）：%q", kind, v)
+		}
+	}
+	return nil
+}
+
+// normalizeServiceType 归一化登记对象类型：空值默认 service，只允许 service/app。
+func normalizeServiceType(v string) (string, error) {
+	v = strings.ToLower(strings.TrimSpace(v))
+	if v == "" {
+		return serviceTypeService, nil
+	}
+	if v != serviceTypeService && v != serviceTypeApp {
+		return "", fmt.Errorf("type 只能是 service 或 app：%q", v)
+	}
+	return v, nil
+}
+
+// normalizeOS 归一化操作系统取值并返回统一展示值（大小写不敏感）。
+func normalizeOS(v string) (string, error) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "", nil
+	}
+	if canonical, ok := allowedOS[strings.ToLower(v)]; ok {
+		return canonical, nil
+	}
+	return "", fmt.Errorf("os 只支持 Android/iOS/MacOS/Windows/Linux：%q", v)
+}
+
+func validateAppID(v string) error {
+	if utf8.RuneCountInString(v) > maxAppIDLen {
+		return fmt.Errorf("appId 过长（上限 %d 字符）", maxAppIDLen)
+	}
+	for _, r := range v {
+		if r < 0x20 || r == 0x7f {
+			return fmt.Errorf("appId 不能包含控制字符（换行/制表符等）：%q", v)
 		}
 	}
 	return nil
