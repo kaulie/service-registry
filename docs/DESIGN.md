@@ -94,16 +94,23 @@ Namespace（隔离域）
 | 取回目录 | `internal/orgdir`：只读客户端，**按需拉取 + 短 TTL 缓存**（默认 30s）。没有常驻同步器、没有定时任务、没有后台 goroutine |
 | 登记时对齐 | `resolveDepartment()`：拿目录把 `departmentId` / `departmentName` 补全成**权威值**（部门改名后重新登记会自动纠回来） |
 | 透出给消费方 | `GET /v1/departments`：把目录 + **数据成色**（enabled/available/cached/stale/error）转给面板与消费方 |
+| 按组织反查服务 | `GET /v1/orgs/{orgId}/services`：**组织视角**的读路径（`org_id` 即 `departmentId`，**只认 ID**、不认名称），响应顺带给出"这个组织是谁"（名称/类型/父部门）与目录成色 —— 消费方不必自己再查一次部门目录 |
 
 关键的取舍是**失败方向**：组织服务不可达时
 
 - 读：`GET /v1/departments` 依然 **200**，带回上次成功的目录并标 `stale=true` + `error` 说明；
+  `GET /v1/orgs/{orgId}/services` 同理：照常按 ID 列出服务，用 `org.resolved/org.note` 说明"没能确认这个组织"；
 - 写：**按声明值保存**，只在响应 `departmentNote` 与日志里提醒。
 
 即"另一个服务挂了"永远不会让本中心的**写路径失败**。唯一会 400 的情况是
 **目录可用且非空、而你给的 `departmentId` 不在里面** —— 那时事实清楚（就是抄错了），
 挡下来比存一条脏引用更有价值。`departmentName` 单独给时永远只当标签，不做存在性校验，
 这样"新部门还没在组织服务里建档"也能先把服务登记进来。
+
+读路径上对应的"事实清楚才报不存在"：`GET /v1/orgs/{orgId}/services` 只在
+**目录可用且非空 + ID 不在目录里 + 本中心也没有服务登记在它下面**三条同时成立时返回 404；
+否则（目录不可达 / 目录为空 / 还有服务引用这个 ID）一律 200 + 说明 ——
+把"组织服务挂了"报成"这个组织不存在"才是真正的错误。
 
 `internal/orgdir` 的包注释里也写了同一套语义（代码与文档同源，避免只有一处对）。
 

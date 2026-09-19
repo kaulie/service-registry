@@ -18,9 +18,14 @@ type ServiceFilter struct {
 	// Department 按**部门**过滤：departmentId 或 departmentName 命中其一即可
 	// （两个字段都存了，调用方不必先知道组织接口里那个 ID 叫什么）。
 	Department string
-	Query      string
-	Limit      int
-	Offset     int
+	// OrgID 按**组织（部门）ID** 过滤：只认 department_id、不认名称
+	// （「按组织查服务」这条读路径专用 —— ID 稳定，名称会变）。
+	// 比较忽略 ASCII 大小写：d0005 与 D0005 是同一个组织，
+	// 而 ID 常常是人手敲/从别处复制进来的，不该被大小写绊住（SQLite 默认是 BINARY 比较）。
+	OrgID  string
+	Query  string
+	Limit  int
+	Offset int
 }
 
 // ListServices 返回服务契约列表与满足条件的总数。
@@ -96,6 +101,10 @@ func serviceWhere(f ServiceFilter) (string, []any) {
 	if f.Department != "" {
 		clauses = append(clauses, "(department_id = ? OR department_name = ?)")
 		args = append(args, f.Department, f.Department)
+	}
+	if f.OrgID != "" {
+		clauses = append(clauses, "department_id COLLATE NOCASE = ?")
+		args = append(args, f.OrgID)
 	}
 	if f.Query != "" {
 		clauses = append(clauses, "(name LIKE ? OR description LIKE ? OR owner LIKE ? OR version LIKE ? OR git_repo_url LIKE ? OR department_name LIKE ? OR department_id LIKE ?)")

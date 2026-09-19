@@ -128,6 +128,7 @@ async function renderOverview() {
     `# 4) 发现：找服务 / 找实例 / 反查接口提供方`,
     `curl -sS '${base}/v1/services?tag=events'`,
     `curl -sS '${base}/v1/services?department=D0001'`,
+    `curl -sS '${base}/v1/orgs/D0001/services'   # 组织视角：这个部门里有哪些服务`,
     `curl -sS '${base}/v1/namespaces/default/services/event-center/instances?pick=random'`,
     `curl -sS '${base}/v1/search/apis?method=GET&path=/v1/streams/abc/events'`,
     ``,
