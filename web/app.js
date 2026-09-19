@@ -140,7 +140,7 @@ async function renderOverview() {
 function serviceMatches(svc, filter) {
   if (!filter) return true;
   const hay = [svc.namespace, svc.name, svc.description, svc.owner, svc.version, svc.gitRepoUrl,
-    svc.departmentName, svc.departmentId]
+    svc.departmentName, svc.departmentId, svc.type, svc.appId, svc.os]
     .join(' ').toLowerCase();
   return hay.includes(filter.toLowerCase());
 }
@@ -246,11 +246,18 @@ function serviceCard(svc) {
     : '<span class="badge badge--warn">仅显式端点</span>';
   const tags = (svc.tags || []).map((t) => `<span class="tag">${esc(t)}</span>`).join('');
   const protocols = (api.protocols || []).map((p) => `<span class="tag">${esc(p)}</span>`).join('');
+  const svcType = (svc.type || 'service') === 'app' ? 'app' : 'service';
+  const typeBadge = `<span class="badge ${svcType === 'app' ? 'badge--info' : 'badge--muted'}" title="注册对象类型">${esc(svcType)}</span>`;
+  const appMeta = svcType === 'app'
+    ? `${svc.appId ? `<span class="tag" title="APP_ID">APP_ID:${esc(svc.appId)}</span>` : ''}`
+      + `${svc.os ? `<span class="tag" title="操作系统">OS:${esc(svc.os)}</span>` : ''}`
+    : '';
 
   card.innerHTML = `
     <div class="item__head">
       <span class="item__title">${esc(svc.namespace)}/${esc(svc.name)}</span>
       ${svc.version ? `<span class="item__meta">v${esc(svc.version)}</span>` : ''}
+      ${typeBadge}
       <span class="badge ${svc.instanceCount > 0 ? 'badge--ok' : 'badge--warn'}">${esc(svc.instanceCount)} 个实例</span>
       <span class="badge badge--muted">${esc(endpoints.length)} 个端点</span>
       ${specBadge}
@@ -258,7 +265,7 @@ function serviceCard(svc) {
     </div>
     ${svc.description ? `<p class="item__desc">${esc(svc.description)}</p>` : ''}
     <div class="item__meta" style="margin-top:6px">
-      ${tags}${protocols}${svc.owner ? `<span class="tag">owner:${esc(svc.owner)}</span>` : ''}
+      ${tags}${protocols}${appMeta}${svc.owner ? `<span class="tag">owner:${esc(svc.owner)}</span>` : ''}
       ${deptTag(svc)}
       ${svc.healthPath ? `<span class="tag">health:${esc(svc.healthPath)}</span>` : ''}
       ${svc.gitRepoUrl ? repoTag(svc.gitRepoUrl) : ''}

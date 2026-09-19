@@ -20,6 +20,13 @@ const TARGET = {
 const isEdit = Boolean(TARGET.name);
 
 const field = (id) => $('#svc-form-' + id);
+// 类型决定 app 专属字段（APP_ID / 操作系统）是否显示：service 不落这两个字段，
+// app 时必填并保存。空契约默认按 service 处理，与后端 normalizeServiceType 一致。
+function syncTypeFields() {
+  const isApp = field('type').value === 'app';
+  show(field('appid-wrap'), isApp);
+  show(field('os-wrap'), isApp);
+}
 // 契约上实际用到的部门（来自 /v1/services）：与组织目录一起构成部门下拉的候选，
 // 否则编辑一个"组织接口里已下线、但契约上还写着"的部门时，下拉里没有它 → 一提交就被清掉。
 let knownServices = [];
@@ -99,6 +106,10 @@ function resetForNew() {
   field('name').disabled = false;
   ['name', 'version', 'owner', 'health', 'desc', 'tags', 'docs', 'repo', 'specurl', 'spec']
     .forEach((k) => { field(k).value = ''; });
+  field('type').value = 'service';
+  field('appid').value = '';
+  field('os').value = 'Android';
+  syncTypeFields();
   field('dept').value = '';
   setEpRows(null);
   setApiMode('spec');
@@ -127,6 +138,10 @@ async function loadForEdit() {
   field('owner').value = svc.owner || '';
   field('health').value = svc.healthPath || '';
   field('desc').value = svc.description || '';
+  field('type').value = svc.type || 'service';
+  field('appid').value = svc.appId || '';
+  field('os').value = svc.os || 'Android';
+  syncTypeFields();
   field('repo').value = svc.gitRepoUrl || '';
   field('dept').value = svcDeptKey(svc);
   field('tags').value = (svc.tags || []).join(',');
@@ -247,13 +262,36 @@ async function submitContract() {
     return;
   }
 
+  // 注册对象类型：service 是后端服务；app 时 APP_ID 与操作系统必填（与后端校验一致）。
+  const typeEl = field('type');
+  const type = typeEl.value;
+  if (type !== 'service' && type !== 'app') {
+    formFail(hint, '类型只能是 service 或 app', typeEl);
+    return;
+  }
+  const appId = field('appid').value.trim();
+  const os = field('os').value;
+  if (type === 'app' && !appId) {
+    formFail(hint, 'type 为 app 时必须填写 APP_ID', field('appid'));
+    return;
+  }
+  if (type === 'app' && !os) {
+    formFail(hint, 'type 为 app 时必须选择操作系统（os）', field('os'));
+    return;
+  }
+
   const body = {
+    type,
     version: field('version').value.trim(),
     owner: field('owner').value.trim(),
     description: field('desc').value.trim(),
     healthPath: health,
     api: apiPart,
   };
+  if (type === 'app') {
+    body.appId = appId;
+    body.os = os;
+  }
   if (repo) body.gitRepoUrl = repo;
   // 归属部门：只发下拉选中的那个（选中项就是权威值 —— 组织接口给的 ID/名称）。
   // 不选 = 不带该字段，PUT 是整份覆盖，等于把部门清掉（与 gitRepoUrl 的语义一致）。
@@ -310,6 +348,7 @@ $('#svc-form-submit').addEventListener('click', submitContract);
 $('#svc-form-cancel').addEventListener('click', () => { location.href = './#services'; });
 $('#svc-form-ep-add').addEventListener('click', () => $('#svc-form-eps tbody').appendChild(epRow(null)));
 $('#svc-form-mode').addEventListener('change', (e) => setApiMode(e.target.value));
+$('#svc-form-type').addEventListener('change', syncTypeFields);
 $('#svc-form-spec-template').addEventListener('click', () => prefillSpecTemplate(true));
 $('#svc-form-name').addEventListener('input', () => prefillSpecTemplate(false));
 // 「重新同步部门」：强制跳过服务端 TTL 缓存重取组织接口的目录（组织服务刚建了新部门时用）。
