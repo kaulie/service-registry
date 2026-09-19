@@ -43,6 +43,26 @@
         <label>healthPath <input type="text" id="svc-form-health" placeholder="/health" /></label>
       </div>
       <div class="form-row">
+        <label>类型
+          <select id="svc-form-type">
+            <option value="service">service（后端服务）</option>
+            <option value="app">app（移动/桌面应用）</option>
+          </select>
+        </label>
+        <label id="svc-form-appid-wrap" hidden>APP_ID
+          <input type="text" id="svc-form-appid" placeholder="com.example.mobile" />
+        </label>
+        <label id="svc-form-os-wrap" hidden>操作系统
+          <select id="svc-form-os">
+            <option>Android</option>
+            <option>iOS</option>
+            <option>MacOS</option>
+            <option>Windows</option>
+            <option>Linux</option>
+          </select>
+        </label>
+      </div>
+      <div class="form-row">
         <label class="grow">描述 <input type="text" id="svc-form-desc" placeholder="一句话说明这个服务是干什么的" /></label>
         <label class="grow">标签（逗号分隔） <input type="text" id="svc-form-tags" placeholder="events,pubsub" /></label>
         <label class="grow">文档链接 <input type="text" id="svc-form-docs" placeholder="https://…" /></label>

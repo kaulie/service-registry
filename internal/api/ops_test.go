@@ -76,6 +76,8 @@ func TestOpsEndpointsAndPanel(t *testing.T) {
 		"登记服务契约", "openapi: 3.0.3", "预填最小模板", "重新同步部门",
 		`id="svc-form-submit" type="button"`, `src="shared.js"`, `src="contract.js"`,
 		`href="./#services"`, // 保存后回面板（页签写进 URL，落回服务目录）
+		// 注册对象类型：service/app，app 时额外编辑 APP_ID 与操作系统。
+		`id="svc-form-type"`, `id="svc-form-appid"`, `id="svc-form-os"`,
 	} {
 		if !strings.Contains(form, want) {
 			t.Errorf("契约编辑页 HTML 缺少 %q", want)
@@ -94,6 +96,7 @@ func TestOpsEndpointsAndPanel(t *testing.T) {
 	js := e.getRaw(t, "/panel/app.js")
 	for _, want := range []string{
 		"/v1/snapshot", "inst-batch-submit", "contract.html?", // 卡片上的「编辑契约」是独立页面的链接
+		"APP_ID:", "OS:", "title=\"注册对象类型\"", // 服务卡片显示注册对象类型，app 额外显示 APP_ID 与操作系统
 	} {
 		if !strings.Contains(js, want) {
 			t.Errorf("面板 JS 缺少 %q", want)
@@ -108,6 +111,8 @@ func TestOpsEndpointsAndPanel(t *testing.T) {
 		"submitContract", "svc-form-submit", "initContractPage",
 		// 反馈永不静默：校验失败要 toast + 标红字段
 		"formFail", "prefillSpecTemplate",
+		// 注册对象类型在编辑页可编辑：service/app 切换与 app 专属字段校验。
+		"syncTypeFields", "type 为 app 时必须填写 APP_ID",
 	} {
 		if !strings.Contains(formJS, want) {
 			t.Errorf("contract.js 缺少 %q", want)

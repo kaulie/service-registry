@@ -9,6 +9,8 @@
      · 深色是默认，<html data-theme="light"> 换一整套取值（右上角有开关）。
 */
 
+[hidden] { display: none !important; }
+
 :root {
   color-scheme: dark;
 

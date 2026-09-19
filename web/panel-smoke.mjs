@@ -366,6 +366,73 @@ async function scenarioInvalidName() {
   check(dom.q('#svc-form-name')._errors.includes('field-error'), '标红了服务名输入框');
 }
 
+async function scenarioServiceTypeCard() {
+  console.log('\n场景：服务卡片显示注册对象类型（service/app），app 额外显示 APP_ID 与操作系统');
+  const svc = { ...EVENT_CENTER, type: 'service' };
+  const app = { ...EVENT_CENTER, name: 'mobile-app', type: 'app', appId: 'com.example.mobile', os: 'iOS' };
+  const dom = buildDom({ services: [svc, app] });
+  await click(dom, '#svc-refresh');
+  const cards = collectCards(dom.q('#svc-list'));
+  const svcCard = cards.find((c) => c.innerHTML.includes('event-center'));
+  const appCard = cards.find((c) => c.innerHTML.includes('mobile-app'));
+  check(!!svcCard && svcCard.innerHTML.includes('>service</span>'), 'service 卡片显示类型 service');
+  check(!!appCard && appCard.innerHTML.includes('>app</span>'), 'app 卡片显示类型 app');
+  check(!!appCard && appCard.innerHTML.includes('APP_ID:com.example.mobile'), 'app 卡片显示 APP_ID');
+  check(!!appCard && appCard.innerHTML.includes('OS:iOS'), 'app 卡片显示操作系统');
+  check(!!svcCard && !svcCard.innerHTML.includes('APP_ID'), 'service 卡片不显示 APP_ID/OS');
+}
+
+async function scenarioContractTypeForm() {
+  console.log('\n场景：契约编辑页可编辑注册对象类型（service/app），app 时必填 APP_ID 与操作系统');
+  const dom = await buildContractDom();
+  check(dom.q('#svc-form-type').value === 'service', '新登记默认类型是 service');
+  check(dom.q('#svc-form-appid-wrap').hidden === true && dom.q('#svc-form-os-wrap').hidden === true,
+    'service 时 APP_ID 与操作系统字段隐藏');
+
+  dom.q('#svc-form-type').value = 'app';
+  await fire(dom, '#svc-form-type', 'change');
+  check(dom.q('#svc-form-appid-wrap').hidden === false && dom.q('#svc-form-os-wrap').hidden === false,
+    '切到 app 后显示 APP_ID 与操作系统字段');
+
+  // app 少了 APP_ID：本地就要拦住，并把错误指到字段上
+  fillServiceForm(dom);
+  dom.q('#svc-form-appid').value = '';
+  await click(dom, '#svc-form-submit');
+  check(String(dom.q('#svc-form-hint').textContent).includes('APP_ID'), 'app 缺少 APP_ID 时提示点名字段');
+  check(dom.q('#svc-form-appid')._errors.includes('field-error'), '标红 APP_ID 输入框');
+  check(dom.requests.filter((r) => r.method === 'PUT').length === 0, '本地就拦住了，不发请求');
+
+  // 补齐后提交：请求体带上 type/appId/os
+  const ok = await buildContractDom();
+  fillServiceForm(ok);
+  ok.q('#svc-form-type').value = 'app';
+  await fire(ok, '#svc-form-type', 'change');
+  ok.q('#svc-form-appid').value = 'com.example.mobile';
+  ok.q('#svc-form-os').value = 'iOS';
+  await click(ok, '#svc-form-submit');
+  const put = ok.requests.find((r) => r.method === 'PUT');
+  const body = put ? JSON.parse(put.body) : {};
+  check(body.type === 'app' && body.appId === 'com.example.mobile' && body.os === 'iOS',
+    'app 提交时请求体带上 type/appId/os：' + (put ? put.body : '(无请求)'));
+}
+
+async function scenarioContractTypeEditApp() {
+  console.log('\n场景：编辑 app 契约时回填类型、APP_ID 与操作系统');
+  const app = {
+    ...EVENT_CENTER, name: 'mobile-app', type: 'app', appId: 'com.example.mobile', os: 'iOS',
+    api: { ...EVENT_CENTER.api },
+  };
+  const dom = await buildContractDom({
+    search: '?ns=default&name=mobile-app', service: app,
+    spec: 'openapi: 3.0.3\ninfo:\n  title: mobile-app\n',
+  });
+  check(dom.q('#svc-form-type').value === 'app', '类型回填 app');
+  check(dom.q('#svc-form-appid').value === 'com.example.mobile', 'APP_ID 回填');
+  check(dom.q('#svc-form-os').value === 'iOS', '操作系统回填 iOS');
+  check(dom.q('#svc-form-appid-wrap').hidden === false && dom.q('#svc-form-os-wrap').hidden === false,
+    'app 时 APP_ID 与操作系统字段保持可见');
+}
+
 async function scenarioSuccess() {
   console.log('\n场景：填齐并提交成功');
   const dom = await buildContractDom();
@@ -750,6 +817,9 @@ for (const s of [
   scenarioContractPageNew,
   scenarioContractEditFromURL,
   scenarioPanelLinksToContractPage,
+  scenarioServiceTypeCard,
+  scenarioContractTypeForm,
+  scenarioContractTypeEditApp,
   scenarioSubmitWithoutSpec,
   scenarioInvalidName,
   scenarioInvalidGitRepoURL,
