@@ -27,8 +27,22 @@ echo "[build] service-registry version=${VERSION}"
 rm -rf "${OUT}"
 mkdir -p "${OUT}/bin" "${OUT}/scripts"
 
-# Go 缓存/临时目录隔离在仓库之外（可覆盖），理由见 Makefile 注释。
-BUILD_CACHE="${REGISTRY_BUILD_CACHE:-${TMPDIR:-/tmp}/service-registry-build-cache}"
+# Go 缓存/临时目录隔离在仓库之外。默认每次打包都使用全新的临时目录，
+# 避免复用被上一次失败构建污染（例如模块缓存里只留下了目录、缺了文件）的
+# 旧缓存，否则会报 "no required module provides package ..."。
+# REGISTRY_BUILD_CACHE 仍可显式指定（用于本地复现/预热缓存）。
+if [ -n "${REGISTRY_BUILD_CACHE:-}" ]; then
+  BUILD_CACHE="${REGISTRY_BUILD_CACHE}"
+else
+  BUILD_CACHE="$(mktemp -d "${TMPDIR:-/tmp}/service-registry-build-cache.XXXXXX")"
+  cleanup_build_cache() {
+    local status=$?
+    chmod -R u+w "${BUILD_CACHE}" 2>/dev/null || true
+    rm -rf "${BUILD_CACHE}" 2>/dev/null || true
+    exit "${status}"
+  }
+  trap cleanup_build_cache EXIT
+fi
 export GOMODCACHE="${BUILD_CACHE}/gomodcache"
 export GOCACHE="${BUILD_CACHE}/gocache"
 export GOPATH="${BUILD_CACHE}/gopath"
