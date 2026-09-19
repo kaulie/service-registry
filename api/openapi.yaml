@@ -674,6 +674,18 @@ components:
       properties:
         namespace: { type: string }
         name: { type: string }
+        type:
+          type: string
+          enum: [service, app]
+          default: service
+          description: 登记对象类型：service（后端服务，默认）或 app（移动/桌面应用）
+        appId:
+          type: string
+          description: type 为 app 时的稳定应用标识；type 为 service 时为空
+        os:
+          type: string
+          enum: [Android, iOS, MacOS, Windows, Linux]
+          description: type 为 app 时选择的操作系统
         version: { type: string }
         owner: { type: string }
         description: { type: string }
@@ -702,6 +714,18 @@ components:
       type: object
       description: 登记契约的请求体（与 Service 同构，可"GET → 改 → PUT"闭环）
       properties:
+        type:
+          type: string
+          enum: [service, app]
+          default: service
+          description: 登记对象类型；缺省为 service。填 app 时 appId 与 os 必填
+        appId:
+          type: string
+          description: type 为 app 时必填的稳定应用标识（也接受 app_id 别名）
+        os:
+          type: string
+          enum: [Android, iOS, MacOS, Windows, Linux]
+          description: type 为 app 时必选的操作系统
         version: { type: string }
         owner: { type: string }
         description: { type: string }

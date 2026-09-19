@@ -40,6 +40,21 @@ var columnMigrations = []columnMigration{
 		Column: "department_name",
 		DDL:    `ALTER TABLE services ADD COLUMN department_name TEXT NOT NULL DEFAULT ''`,
 	},
+	{
+		Table:  "services",
+		Column: "type",
+		DDL:    `ALTER TABLE services ADD COLUMN type TEXT NOT NULL DEFAULT 'service'`,
+	},
+	{
+		Table:  "services",
+		Column: "app_id",
+		DDL:    `ALTER TABLE services ADD COLUMN app_id TEXT NOT NULL DEFAULT ''`,
+	},
+	{
+		Table:  "services",
+		Column: "os",
+		DDL:    `ALTER TABLE services ADD COLUMN os TEXT NOT NULL DEFAULT ''`,
+	},
 }
 
 // applyColumnMigrations 幂等地把缺的列补上（SQLite 没有 ADD COLUMN IF NOT EXISTS）。

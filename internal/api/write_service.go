@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -14,6 +15,10 @@ import (
 // 刻意与响应结构（model.Service）保持一致，只是 api 里多出可写的 spec/specFormat——
 // 这样"GET 一个服务 → 改一改 → PUT 回去"可以闭环（便于复制/迁移服务定义）。
 type serviceWrite struct {
+	// Type 区分登记对象是 service（后端服务，默认）还是 app（移动/桌面应用）。
+	Type        string `json:"type"`
+	AppID       string `json:"appId"` // 兼容题面里的 app_id 写法（见 UnmarshalJSON）
+	OS          string `json:"os"`
 	Version     string `json:"version"`
 	Owner       string `json:"owner"`
 	Description string `json:"description"`
@@ -34,6 +39,24 @@ type apiWrite struct {
 	// 提供后由服务端解析出端点索引；也可只给 api.endpoints 显式声明端点。
 	Spec       string `json:"spec"`
 	SpecFormat string `json:"specFormat"`
+}
+
+// UnmarshalJSON 同时接受 appId（仓库 JSON 约定）与 app_id（题面字段名），
+// 二者都给时以 appId 为准。
+func (b *serviceWrite) UnmarshalJSON(data []byte) error {
+	type plain serviceWrite
+	var aux struct {
+		*plain
+		AppIDSnake string `json:"app_id"`
+	}
+	aux.plain = (*plain)(b)
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if b.AppID == "" {
+		b.AppID = aux.AppIDSnake
+	}
+	return nil
 }
 
 // handlePutService 登记或更新服务契约（幂等）。
@@ -106,6 +129,9 @@ func buildServiceInput(nsName, svcName string, body serviceWrite) (store.Service
 	in.Service = model.Service{
 		Namespace:      nsName,
 		Name:           svcName,
+		Type:           body.Type,
+		AppID:          body.AppID,
+		OS:             body.OS,
 		Version:        strings.TrimSpace(body.Version),
 		Owner:          strings.TrimSpace(body.Owner),
 		Description:    body.Description,
@@ -157,7 +183,43 @@ func buildServiceInput(nsName, svcName string, body serviceWrite) (store.Service
 	return in, nil
 }
 
+// normalizeServiceWrite 归一化并校验注册类型相关字段：
+//   - type 缺省为 service；
+//   - type=app 时 appId 与 os 必填，且 os 取值收敛为统一展示值；
+//   - type=service 时不落 appId/os（这些字段只对 app 有意义）。
+func normalizeServiceWrite(body *serviceWrite) error {
+	typ, err := normalizeServiceType(body.Type)
+	if err != nil {
+		return err
+	}
+	body.Type = typ
+	body.AppID = strings.TrimSpace(body.AppID)
+	if typ == serviceTypeService {
+		body.AppID = ""
+		body.OS = ""
+		return nil
+	}
+	if body.AppID == "" {
+		return errString("type 为 app 时必须提供 appId")
+	}
+	if err := validateAppID(body.AppID); err != nil {
+		return err
+	}
+	osName, err := normalizeOS(body.OS)
+	if err != nil {
+		return err
+	}
+	if osName == "" {
+		return errString("type 为 app 时必须选择操作系统（os）：Android/iOS/MacOS/Windows/Linux")
+	}
+	body.OS = osName
+	return nil
+}
+
 func validateServiceWrite(body *serviceWrite, maxSpecBytes int) error {
+	if err := normalizeServiceWrite(body); err != nil {
+		return err
+	}
 	if err := validateText("服务描述", body.Description); err != nil {
 		return err
 	}

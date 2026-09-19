@@ -22,6 +22,9 @@ type ServiceInput struct {
 // 返回服务视图与"是否新建"。
 func (s *Store) UpsertService(ctx context.Context, in ServiceInput, actor string) (model.Service, bool, error) {
 	svc := in.Service
+	if svc.Type == "" {
+		svc.Type = "service"
+	}
 	now := time.Now().UTC()
 	created := false
 
@@ -36,12 +39,12 @@ func (s *Store) UpsertService(ctx context.Context, in ServiceInput, actor string
 
 		if created {
 			if _, err := tx.ExecContext(ctx, `
-				INSERT INTO services (namespace, name, version, owner, description, git_repo_url,
+				INSERT INTO services (namespace, name, type, app_id, os, version, owner, description, git_repo_url,
 				                      department_id, department_name, tags, protocols,
 				                      base_path, health_path, auth_schemes, docs_url, spec_url,
 				                      spec, spec_format, spec_hash, revision, created_at, updated_at, registered_by)
-				VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)`,
-				svc.Namespace, svc.Name, svc.Version, svc.Owner, svc.Description, svc.GitRepoURL,
+				VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)`,
+				svc.Namespace, svc.Name, svc.Type, svc.AppID, svc.OS, svc.Version, svc.Owner, svc.Description, svc.GitRepoURL,
 				svc.DepartmentID, svc.DepartmentName,
 				encodeStrings(svc.Tags), encodeStrings(svc.API.Protocols), svc.BasePath, svc.HealthPath,
 				encodeAuthSchemes(svc.API.Auth), svc.API.DocsURL, svc.API.SpecURL,
@@ -51,12 +54,12 @@ func (s *Store) UpsertService(ctx context.Context, in ServiceInput, actor string
 			}
 		} else {
 			if _, err := tx.ExecContext(ctx, `
-				UPDATE services SET version = ?, owner = ?, description = ?, git_repo_url = ?,
+				UPDATE services SET type = ?, app_id = ?, os = ?, version = ?, owner = ?, description = ?, git_repo_url = ?,
 				       department_id = ?, department_name = ?, tags = ?, protocols = ?,
 				       base_path = ?, health_path = ?, auth_schemes = ?, docs_url = ?, spec_url = ?,
 				       spec = ?, spec_format = ?, spec_hash = ?, updated_at = ?, registered_by = ?
 				 WHERE namespace = ? AND name = ?`,
-				svc.Version, svc.Owner, svc.Description, svc.GitRepoURL,
+				svc.Type, svc.AppID, svc.OS, svc.Version, svc.Owner, svc.Description, svc.GitRepoURL,
 				svc.DepartmentID, svc.DepartmentName,
 				encodeStrings(svc.Tags), encodeStrings(svc.API.Protocols),
 				svc.BasePath, svc.HealthPath, encodeAuthSchemes(svc.API.Auth), svc.API.DocsURL, svc.API.SpecURL,

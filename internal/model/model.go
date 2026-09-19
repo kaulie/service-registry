@@ -108,8 +108,13 @@ type ServiceAPI struct {
 
 // Service 是服务契约（低频变更，发版时更新）。
 type Service struct {
-	Namespace   string `json:"namespace"`
-	Name        string `json:"name"`
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	// Type 区分登记对象是后端服务（service，默认）还是移动/桌面应用（app）。
+	// 仅 app 需要填 AppID 与 OS（见 API 层校验）。
+	Type        string `json:"type"`
+	AppID       string `json:"appId,omitempty"`
+	OS          string `json:"os,omitempty"`
 	Version     string `json:"version,omitempty"`
 	Owner       string `json:"owner,omitempty"`
 	Description string `json:"description,omitempty"`

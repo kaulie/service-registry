@@ -13,6 +13,9 @@ CREATE TABLE IF NOT EXISTS namespaces (
 CREATE TABLE IF NOT EXISTS services (
   namespace     TEXT NOT NULL,
   name          TEXT NOT NULL,
+  type          TEXT NOT NULL DEFAULT 'service',
+  app_id        TEXT NOT NULL DEFAULT '',
+  os            TEXT NOT NULL DEFAULT '',
   version       TEXT NOT NULL DEFAULT '',
   owner         TEXT NOT NULL DEFAULT '',
   description   TEXT NOT NULL DEFAULT '',

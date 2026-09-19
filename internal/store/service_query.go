@@ -10,7 +10,7 @@ import (
 )
 
 // serviceColumns 是 services 表的完整读取列（顺序与 scanService 一致）。
-const serviceColumns = `namespace, name, version, owner, description, git_repo_url, department_id, department_name, tags,
+const serviceColumns = `namespace, name, type, app_id, os, version, owner, description, git_repo_url, department_id, department_name, tags,
   protocols, base_path, health_path, auth_schemes, docs_url, spec_url, spec, spec_format, spec_hash, revision,
   created_at, updated_at, registered_by`
 
@@ -71,7 +71,7 @@ func scanService(r rowScanner) (model.Service, error) {
 		specHash             string
 		createdAt, updatedAt string
 	)
-	if err := r.Scan(&svc.Namespace, &svc.Name, &svc.Version, &svc.Owner, &svc.Description, &svc.GitRepoURL,
+	if err := r.Scan(&svc.Namespace, &svc.Name, &svc.Type, &svc.AppID, &svc.OS, &svc.Version, &svc.Owner, &svc.Description, &svc.GitRepoURL,
 		&svc.DepartmentID, &svc.DepartmentName,
 		&tags, &protocols, &svc.BasePath, &svc.HealthPath, &authSchemes, &svc.API.DocsURL, &svc.API.SpecURL,
 		&specRaw, &specFormat, &specHash, &svc.Revision, &createdAt, &updatedAt, &svc.RegisteredBy,
