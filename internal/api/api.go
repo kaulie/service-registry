@@ -83,6 +83,8 @@ func (s *Server) Handler() http.Handler {
 	add(http.MethodGet, "/v1/search/apis", s.handleSearchAPIs)
 	// 部门目录（数据来自组织接口，本中心只取回来转给面板/消费方）
 	add(http.MethodGet, "/v1/departments", s.handleListDepartments)
+	// 按组织（部门）查服务列表：org_id 即契约上的 departmentId
+	add(http.MethodGet, "/v1/orgs/{orgId}/services", s.handleListServicesByOrg)
 
 	// ---- 命名空间 ----
 	add(http.MethodGet, "/v1/namespaces", s.handleListNamespaces)
