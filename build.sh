@@ -36,6 +36,8 @@ export GOTMPDIR="${BUILD_CACHE}/gotmp"
 mkdir -p "${GOMODCACHE}" "${GOCACHE}" "${GOPATH}" "${GOTMPDIR}"
 # 默认用可达的模块/工具链代理（部分网络下 proxy.golang.org 走 IPv6 不可达）。
 [ -n "${GOPROXY:-}" ] || export GOPROXY="https://goproxy.cn,direct"
+# 使用控制面已安装的 Go 工具链构建，避免自动下载不完整的 go1.25 工具链。
+[ -n "${GOTOOLCHAIN:-}" ] || export GOTOOLCHAIN="local"
 
 LDFLAGS="-s -w -X main.version=${VERSION}"
 
