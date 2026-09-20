@@ -1,0 +1,41 @@
+# 把这段复制到**服务仓库**的 .github/workflows/register-contract.yml（把 xxx 换成自己的值）。
+#
+# 作用：push 到 main / 发版时，**读代码里的 swag 注解 → 生成 OpenAPI → 登记到注册中心**。
+# 幂等：契约没变化时 register.sh 会跳过 PUT（不刷 revision）。
+#
+# ⚠️ runner：注册中心默认只绑 127.0.0.1（写接口默认开放，刻意不暴露到网络），
+#    GitHub-hosted runner **够不到** —— 用 self-hosted runner（跑在部署机上的那个）。
+name: register-contract
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  register:
+    runs-on: [self-hosted, macOS]        # ← 必须是能直连注册中心（127.0.0.1:4240）的 runner
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      # 注册中心的 client/ 脚本（公开仓库，浅克隆一份即可；也可以 vendored 到自己仓库里）
+      - name: 取注册中心的登记脚本
+        run: git clone --depth 1 https://github.com/kaulie/service-registry /tmp/service-registry
+
+      - name: 读代码（swag 注解）→ 登记契约 + 实例
+        env:
+          SERVICE_NAME: xxx-service            # ← 注册用的服务名
+          REGISTRY_URL: http://127.0.0.1:4240
+          REGISTRY_NS: default                 # ← 你们的命名空间
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_NS_TOKEN }}   # 收紧写权限后才需要
+          DEPARTMENT_ID: D0005                 # ← 归属部门 ID（见 GET /v1/departments）
+          INSTANCES: 127.0.0.1:9099            # ← 实例地址，逗号分隔
+          OWNER: xxx
+          HEALTH_PATH: /health
+          TAGS: events
+          SWAG_MAIN: cmd/xxx-service/main.go   # 不填则自动探测 ./cmd/<service>/main.go → ./main.go
+        run: bash /tmp/service-registry/client/ci/register-go-service.sh

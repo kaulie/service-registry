@@ -23,6 +23,13 @@
 #   client/register.sh --service event-center --file api/openapi.yaml
 #   client/register.sh --service event-center --instance 127.0.0.1:9099 --no-contract
 #
+#   # 服务自己暴露了 /openapi.json（FastAPI、@fastify/swagger、swag 起的 docs 接口等）：
+#   # **由本脚本把规范取回来**再内联登记 —— 注册中心本身永远不出网（不抓 specUrl）。
+#   client/register.sh --service event-center --spec-url http://127.0.0.1:9099/openapi.json
+#
+#   # 幂等：契约的 specHash 与库里一致时**跳过 PUT**（不产生无意义的 revision），
+#   # 实例集合仍按声明式对齐。想无条件覆盖用 --force。
+#
 #   # 用 CI 的命名空间令牌（写接口需要令牌；本机未配置 admin 令牌时可不传）
 #   REGISTRY_TOKEN=rt_xxx client/register.sh --service foo --file api/openapi.yaml
 #
@@ -42,6 +49,8 @@ NS="${REGISTRY_NS:-default}"
 
 SERVICE=""
 SPEC_FILE=""
+SPEC_URL=""
+FORCE=0
 VERSION=""
 OWNER=""
 DESCRIPTION=""
@@ -58,7 +67,8 @@ NO_CONTRACT=0
 NO_INSTANCES=0
 
 usage() {
-  sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  # 打印文件头部的用法注释（到 `set -euo pipefail` 为止；改注释不用改这里）
+  awk 'NR>1 && /^set -euo pipefail/ {exit} NR>1 {print}' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 
@@ -66,6 +76,8 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --service)      SERVICE="${2:?}"; shift 2 ;;
     --file)         SPEC_FILE="${2:?}"; shift 2 ;;
+    --spec-url)     SPEC_URL="${2:?}"; shift 2 ;;
+    --force)        FORCE=1; shift ;;
     --instance)     INSTANCES+=("${2:?}"); shift 2 ;;
     --tag)          TAGS+=("${2:?}"); shift 2 ;;
     --version)      VERSION="${2:?}"; shift 2 ;;
@@ -89,8 +101,8 @@ while [ $# -gt 0 ]; do
 done
 
 [ -n "${SERVICE}" ] || { echo "缺少 --service" >&2; exit 1; }
-if [ "${NO_CONTRACT}" -eq 0 ] && [ -z "${SPEC_FILE}" ]; then
-  echo "缺少 --file（内联 OpenAPI 文件）；若只想登记实例，请加 --no-contract" >&2
+if [ "${NO_CONTRACT}" -eq 0 ] && [ -z "${SPEC_FILE}" ] && [ -z "${SPEC_URL}" ]; then
+  echo "缺少 --file（内联 OpenAPI 文件）或 --spec-url（服务自己暴露的规范地址）；若只想登记实例，请加 --no-contract" >&2
   exit 1
 fi
 command -v python3 >/dev/null 2>&1 || { echo "需要 python3 来安全地拼 JSON" >&2; exit 1; }
@@ -116,7 +128,32 @@ service_url="${REGISTRY_URL}/v1/namespaces/${NS}/services/${SERVICE}"
 
 # ---- 1) 契约（含对外 API）----
 if [ "${NO_CONTRACT}" -eq 0 ]; then
+  # --spec-url：由**调用方**把服务暴露的规范取回来（注册中心自己永远不出网）。
+  if [ -n "${SPEC_URL}" ]; then
+    SPEC_TMP="$(mktemp "${TMPDIR:-/tmp}/registry-spec.XXXXXX")"
+    trap 'rm -f "${SPEC_TMP}"' EXIT
+    echo "==> 从 ${SPEC_URL} 取回规范（本脚本取，注册中心只收）"
+    if ! curl -fsSL --max-time 30 "${SPEC_URL}" -o "${SPEC_TMP}"; then
+      echo "[错误] 取规范失败：${SPEC_URL}" >&2
+      exit 1
+    fi
+    SPEC_FILE="${SPEC_TMP}"
+    echo "    已取回 $(wc -c <"${SPEC_FILE}" | tr -d ' ') 字节"
+  fi
   [ -f "${SPEC_FILE}" ] || { echo "找不到规范文件：${SPEC_FILE}" >&2; exit 1; }
+
+  # 幂等：先比"原文 sha256"与服务端存的 specHash（同一个文件 → 同一个值），
+  # 一致就跳过 PUT —— 否则每次 CI/部署都往变更表里写一条没有意义的 revision。
+  local_hash="$(python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "${SPEC_FILE}")"
+  current_hash="$(curl -sS --max-time 10 "${service_url}" 2>/dev/null | python3 -c \
+    'import json,sys; d=json.load(sys.stdin); print(((d.get("service") or {}).get("api") or {}).get("specHash",""))' \
+    2>/dev/null || true)"
+  put=1
+  if [ "${FORCE}" -eq 0 ] && [ -n "${current_hash}" ] && [ "${current_hash}" = "${local_hash}" ]; then
+    echo "==> 契约无变化（specHash ${local_hash:0:8} 与现有一致）：跳过登记（要强制覆盖加 --force）"
+    put=0
+  fi
+  if [ "${put}" -eq 1 ]; then
   payload="$(SERVICE="${SERVICE}" SPEC_FILE="${SPEC_FILE}" VERSION="${VERSION}" OWNER="${OWNER}" \
              DESCRIPTION="${DESCRIPTION}" HEALTH_PATH="${HEALTH_PATH}" GIT_REPO="${GIT_REPO}" \
              DEPARTMENT_ID="${DEPARTMENT_ID}" DEPARTMENT_NAME="${DEPARTMENT_NAME}" \
@@ -166,6 +203,7 @@ s=d["service"]; print("    端点 %d 个，spec=%s，revision=%s" % (len(s["api"
 (s["api"].get("specHash","") or "")[:8], s.get("revision"))); \
 note=d.get("departmentNote"); print("    部门：%s%s" % ((s.get("departmentName") or s.get("departmentId") or "(未登记)"), \
 (" —— " + note) if note else ""))'
+  fi
 fi
 
 # ---- 2) 实例集合（声明式整组对齐）----
