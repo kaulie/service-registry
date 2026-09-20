@@ -113,10 +113,40 @@ REGISTRY_TOKEN=rt_xxx client/register.sh \
 # 只更新契约 / 只更新实例
 client/register.sh --service event-center --file api/openapi.yaml
 client/register.sh --service event-center --instance 10.0.0.7:9099 --no-contract
+
+# 服务自己暴露了 /openapi.json：**由脚本取回来**再内联登记（注册中心永不出网，不抓 specUrl）
+client/register.sh --service event-center --spec-url http://127.0.0.1:9099/openapi.json
 ```
 
 > `client/register.sh` 是**一次性调用**：跑完就退出。它不是守护进程，不维持心跳，
 > 被登记的服务也不需要做任何改造。
+> 幂等：登记前会比对规范原文的 sha256 与库里的 `api.specHash`，**一致就跳过 PUT**（不刷 revision），
+> 实例集合仍按声明式对齐；要强制覆盖加 `--force`。
+
+### 让 CI 自动登记（Go：swag 注解 → 生成 → 上报）
+
+接口改了没人愿意手工维护规范文件，所以推荐的形态是**注解是唯一真源**：
+
+```
+代码里写 swag 注解 ──swag init──▶ docs/swagger.json ──register.sh──▶ 注册中心（契约 + 实例，幂等）
+```
+
+```bash
+# 服务仓库根目录，一行（读代码 + 上报都在里面）
+SERVICE_NAME=event-center REGISTRY_NS=default \
+DEPARTMENT_ID=D0005 INSTANCES=127.0.0.1:9099 OWNER=kaulie HEALTH_PATH=/health \
+  bash client/ci/register-go-service.sh
+```
+
+- 第一次要做的改造：`main.go` 顶部写 General API Info（`@title/@version/@BasePath`），
+  每个 handler 上写 `@Summary/@Tags/@Router`（注解**只影响生成规范**，运行时零依赖）；
+- 触发点：本机/self-hosted 的 CI、`build.sh` 末尾、或部署平台部署成功之后 ——
+  注册中心默认只绑 `127.0.0.1`（写接口默认开放，刻意不暴露到网络），**GitHub-hosted runner 够不到**；
+- 服务不是 Go（Node/Fastify、Python/FastAPI）：同一套流程，第一步换成
+  `@fastify/swagger`（路由 schema 即注解）或 FastAPI 自带的 `/openapi.json`，再 `--spec-url` 交上来。
+
+细节（注解写法、令牌、触发点对比、常见坑）见 **[client/ci/README.md](client/ci/README.md)**，
+workflow 模板见 `client/ci/github-actions.example.yml`。
 
 ## 归属部门（数据从组织接口同步）
 

@@ -68,6 +68,14 @@ Namespace（隔离域）
 `specUrl` 只存不抓取：抓取会引入出网、SSRF 与定时任务，且让"登记"变成"运行"。
 需要外部规范时由消费方按 `specUrl` 自己去取。
 
+**实践里这份规范从哪来**：不靠人手写。Go 服务用 `swaggo/swag` 的**注释注解**（`@Router`/`@Summary`…）
+让工具读代码生成（`swag init` → `docs/swagger.json`，Swagger 2.0 本中心也收）；Node/FastAPI 用框架
+自带的 `/openapi.json`（`@fastify/swagger` 的路由 schema 即注解）。然后由**服务自己的 CI / 发版流程**
+调 `client/register.sh`（或 Go 用 `client/ci/register-go-service.sh` 一条命令）**推**上来 ——
+注册中心始终不抓取，"取规范"的动作留在调用方这一侧（`client/ci/README.md`）。
+幂等由客户端保证：先比规范原文的 sha256 与库里的 `specHash`，一致就跳过 PUT，
+所以"每次部署都上报"不会把变更表刷成噪声（revision 只在契约**真的**变了时才前进）。
+
 ### 2.3 实例身份与声明式同步
 
 - 身份：显式 `id`（`inst_<ULID>`，字典序即时间序）或 `(scheme,host,port)` 的唯一约束。
