@@ -28,7 +28,11 @@ gh pr create --fill --base main
 ```
 
 - Open the PR against `main`; never push directly to `main`.
-- A PR must pass `make lint` and `make test` before review.
+- A PR must pass `make lint` and `make test` before review. Both are run
+  automatically by [`.github/workflows/ci.yml`](.github/workflows/ci.yml) on
+  every PR (plus `-race`, `make build`, `make panel-check`, `make panel-smoke`,
+  and a **routes ↔ self-contract** consistency check). Green CI is a hard gate —
+  if it is red, fix the cause rather than the check.
 - **Merging is a human decision.** The agent that opened the PR reports the PR
   URL and waits; it does not merge, release or deploy on its own.
 

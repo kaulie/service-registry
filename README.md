@@ -1,5 +1,7 @@
 # service-registry
 
+[![ci](https://github.com/kaulie/service-registry/actions/workflows/ci.yml/badge.svg)](https://github.com/kaulie/service-registry/actions/workflows/ci.yml)
+
 **全局独立的服务注册中心（元信息存储中心）。**
 
 服务契约（含**对外 API 这一基础属性**）与实例元信息在这里登记；所有其他平台
@@ -424,6 +426,21 @@ make build        # → bin/registryd
 make run          # 本机起来试
 ```
 
+> 遇到 `make build` 报 `no required module provides package modernc.org/mathutil`（或 `go-strftime`）？
+> 那是**本机持久模块缓存**（`$TMPDIR/service-registry-build-cache`，为提速而保留）里的残留损坏，
+> 不是仓库问题：`chmod -R u+w "$TMPDIR/service-registry-build-cache" && rm -rf "$TMPDIR/service-registry-build-cache"`
+> 后重跑即可（用全新缓存实测能正常构建；发版用的 `build.sh` 每次都用全新缓存，不受影响）。
+
+### CI
+
+| workflow | 何时跑 | 做什么 |
+|---|---|---|
+| [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | 每个 PR + push 到 `main`（GitHub-hosted） | `make lint`、`make test`（外加并发路径的 `-race`）、`make build` + `make panel-check`、`client/*.sh` 语法、`make panel-smoke`。**路由 ↔ 自述契约**的双向一致性检查也在 `make test` 里：新增接口忘了写进 `api/openapi.yaml`（或文档里留了个不存在的接口）会直接红 |
+| [`.github/workflows/register-contract.yml`](.github/workflows/register-contract.yml) | 手动（`workflow_dispatch`） | **自己登记自己**（dogfood）：把手写的自述契约 `api/openapi.yaml` 与实例 `127.0.0.1:4240` 上报给注册中心（幂等）。必须跑在能直连注册中心的 **self-hosted runner** 上 —— 注册中心只绑 `127.0.0.1`，GitHub-hosted runner 够不到；想随 `main` 自动跑就把该文件里的 `push:` 打开 |
+
+> 其他服务怎么自动登记自己的契约（Go 用 swag 注解读代码生成、CI 一行命令上报）见
+> [`client/ci/README.md`](client/ci/README.md)。
+
 代码结构：
 
 ```
@@ -437,6 +454,7 @@ internal/metrics/     极小的 Prometheus 文本暴露
 internal/config/      环境变量配置（非法值即失败）
 web/                  控制面板（原生 HTML/CSS/JS，go:embed 进二进制）
 client/register.sh    一次性注册脚本（给 CI / 运维用）
+client/ci/            CI 自动登记（Go 用 swag 注解生成规范 + workflow 模板）
 deploy/               部署规范落地（platform 契约登记、Dockerfile、compose）
 ```
 

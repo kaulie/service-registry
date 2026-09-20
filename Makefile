@@ -9,7 +9,11 @@ LDFLAGS   := -X main.version=$(VERSION)
 
 # Go 缓存隔离在仓库之外：控制面调用 build.sh 时 HOME 可能指向 runtime 目录，
 # 缓存落到那里会被下一次 rsync --delete 波及。
-BUILD_CACHE ?= $(TMPDIR)/service-registry-build-cache
+#
+# TMPDIR 在部分环境里**没有导出**（GitHub Actions 的 runner 就是），`$(TMPDIR)` 会展开成空串，
+# 路径变成 `/service-registry-build-cache`（根目录）→ `mkdir: permission denied` 构建失败。
+# 所以这里兜底到 /tmp —— 效果与"系统临时目录"一致，仍然在仓库之外。
+BUILD_CACHE ?= $(if $(TMPDIR),$(TMPDIR),/tmp)/service-registry-build-cache
 
 .PHONY: all build test race lint fmt fmt-check vet run clean docker panel-check panel-smoke panel-e2e help
 

@@ -1,0 +1,56 @@
+# 服务中心**自己**也有一份契约在注册中心里 —— 这个 workflow 把"自登记"自动化（dogfood）。
+#
+# 它做两件事（都是幂等的，重复跑无副作用）：
+#   1) 把本仓库**手写的自述契约** api/openapi.yaml 上报成自己的服务契约；
+#   2) 顺手把实例（127.0.0.1:4240）按声明式对齐。
+#
+# 跑第一次之后，注册中心里 `service_registry` 那条就从"面板生成的最小模板（只有 /health，
+# 239 字节）"变成真实自述契约（api/openapi.yaml 里的全部端点）—— 契约的 specHash 没变化时
+# 脚本会跳过 PUT，所以天天跑也不会把变更表刷成噪声。
+#
+# ⚠️ 两个前提，缺一不可：
+#   1. **必须用能直连注册中心的 self-hosted runner**（部署机上的那个）——
+#      注册中心默认只绑 127.0.0.1:4240（写接口默认开放，刻意不暴露到网络），
+#      GitHub-hosted runner 够不到它；
+#   2. 想让它随 main 自动跑：把下面 `push:` 两行打开（默认只有手动触发，
+#      避免 runner 还没就绪时它一直在队列里干等）。
+#
+# 手动跑：仓库 Actions 页面 → register-contract → Run workflow。
+name: register-contract
+
+on:
+  workflow_dispatch:
+  # push:
+  #   branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  register:
+    name: 上报自述契约 + 实例
+    runs-on: [self-hosted]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 注册中心可达性（不可达就直接失败，不静默跳过）
+        run: curl -fsS --max-time 5 http://127.0.0.1:4240/health
+
+      - name: 登记契约 + 实例（幂等：契约没变则跳过）
+        env:
+          REGISTRY_URL: http://127.0.0.1:4240
+          REGISTRY_NS: default
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_NS_TOKEN }} # 只有写权限收紧后才需要
+        run: |
+          bash client/register.sh \
+            --service service_registry \
+            --file api/openapi.yaml \
+            --version "${GITHUB_SHA:0:8}" \
+            --health-path /health \
+            --department D0002 \
+            --instance 127.0.0.1:4240
+
+      - name: 回读校验（端点必须真的进来了）
+        run: |
+          curl -fsS "http://127.0.0.1:4240/v1/namespaces/default/services/service_registry" |
+            python3 -c 'import json,sys; s=json.load(sys.stdin)["service"]; print("端点 %d 个，specHash %s" % (len(s["api"]["endpoints"]), (s["api"].get("specHash") or "")[:8]))'

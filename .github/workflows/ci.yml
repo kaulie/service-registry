@@ -1,0 +1,77 @@
+# 服务中心（service-registry）自己的 CI：PR 与 push 到 main 时自动跑。
+#
+# 覆盖 BRANCHING.md 的硬性要求（`make lint` / `make test`），另外补上几条这个仓库特有的检查：
+#   - `-race`：本服务的关键路径是**并发写 + long-poll/SSE**，串行跑测试盖不住竞态；
+#   - `make build` + `make panel-check`：二进制能编出来、`go:embed` 的面板资源没漏文件；
+#   - `make panel-smoke`：面板是纯前端（零依赖 node 脚本），Go 测试覆盖不到它的交互逻辑；
+#   - `go test ./internal/apispec/` 里的 **路由 ↔ 自述契约** 双向一致性：
+#     新增接口忘了写进 api/openapi.yaml（或文档里留了个不存在的接口）都会在这里红。
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# 同一分支连续 push 时取消上一轮（省 runner，也避免旧结果盖住新结果）
+concurrency:
+  group: "ci-${{ github.ref }}"
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: lint（gofmt + go vet）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: make lint
+
+  test:
+    name: test（含并发路径的 -race）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: 全部单元测试
+        run: make test
+      - name: 竞态检测（并发写 / long-poll / SSE）
+        run: go test -race -count=1 ./internal/api/... ./internal/store/...
+
+  build:
+    name: build（二进制 + panel-check + 脚本语法）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: 构建本机二进制
+        run: make build
+      - name: 面板资源完整性（go:embed 没漏文件）
+        run: make panel-check
+      - name: client 脚本语法（新增脚本会被自动带上）
+        run: |
+          for f in client/register.sh client/ci/*.sh; do
+            if [ -f "$f" ]; then bash -n "$f" && echo "ok $f"; fi
+          done
+
+  panel:
+    name: panel-smoke（面板交互冒烟）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: make panel-smoke
