@@ -750,6 +750,7 @@ async function renderInstances() {
     <tr>
       <td class="mono">${esc(i.id)}</td>
       <td class="mono">${esc(i.scheme)}://${esc(i.host)}:${esc(i.port)}</td>
+      <td class="mono">${esc(i.os || '')}</td>
       <td class="mono">${esc(JSON.stringify(i.metadata || {}))}</td>
       <td>${esc(fmtTime(i.updatedAt))}</td>
       <td class="mono">${esc(i.registeredBy || '')}</td>
@@ -757,7 +758,7 @@ async function renderInstances() {
     </tr>`).join('');
   const wrap = el('div', 'item');
   wrap.innerHTML = `<table>
-    <thead><tr><th>ID</th><th>地址</th><th>metadata</th><th>更新时间</th><th>来源</th><th></th></tr></thead>
+    <thead><tr><th>ID</th><th>地址</th><th>机器 OS</th><th>metadata</th><th>更新时间</th><th>来源</th><th></th></tr></thead>
     <tbody>${rows}</tbody></table>`;
   wrap.querySelectorAll('button[data-id]').forEach((btn) => {
     btn.addEventListener('click', async () => {
@@ -889,6 +890,7 @@ function openInstanceForm() {
   show($('#inst-batch-card'), false);
   $('#inst-form-title').textContent = `新增实例 → ${target.ns}/${target.svc}`;
   $('#inst-form-scheme').value = 'http';
+  $('#inst-form-os').value = '';
   ['host', 'port', 'meta'].forEach((k) => { $('#inst-form-' + k).value = ''; });
   setHint($('#inst-form-hint'), '');
   show($('#inst-form-card'), true);
@@ -903,16 +905,22 @@ async function submitInstanceForm() {
 
   const hostEl = $('#inst-form-host');
   const portEl = $('#inst-form-port');
+  const osEl = $('#inst-form-os');
   const host = hostEl.value.trim();
   const port = Number(portEl.value);
+  const os = osEl.value.trim().toLowerCase();
   if (!host) { formFail(hint, 'host 必填（主机名或 IP，不要带 http:// 与路径）', hostEl); return; }
   if (/[:/]/.test(host.replace(/^\[.*\]$/, ''))) {
     formFail(hint, 'host 只能是主机名或 IP，不要带协议与路径：' + host, hostEl);
     return;
   }
   if (!port || port < 1 || port > 65535) { formFail(hint, 'port 必须在 1-65535 之间', portEl); return; }
+  if (!['linux', 'mac', 'windows'].includes(os)) {
+    formFail(hint, '必须选择机器操作系统（linux / mac / windows）', osEl);
+    return;
+  }
 
-  const body = { scheme: $('#inst-form-scheme').value, host, port };
+  const body = { scheme: $('#inst-form-scheme').value, host, port, os };
   const meta = parseKV($('#inst-form-meta').value);
   if (Object.keys(meta).length) body.metadata = meta;
 
@@ -943,7 +951,7 @@ async function submitBatchForm() {
   const jsonEl = $('#inst-batch-json');
   const raw = jsonEl.value.trim();
   if (!raw) {
-    formFail(hint, '请贴实例数组，例如 [{"scheme":"http","host":"10.0.0.7","port":9099}]', jsonEl);
+    formFail(hint, '请贴实例数组，例如 [{"scheme":"http","host":"10.0.0.7","port":9099,"os":"linux"}]', jsonEl);
     return;
   }
   let parsed;
@@ -957,6 +965,14 @@ async function submitBatchForm() {
   if (!Array.isArray(items)) {
     formFail(hint, '需要数组：直接贴 [ {...} ]，或用 {"instances":[...]} 包一层', jsonEl);
     return;
+  }
+  for (let i = 0; i < items.length; i++) {
+    const raw = String((items[i] && items[i].os) || '').trim().toLowerCase();
+    if (!['linux', 'mac', 'windows'].includes(raw)) {
+      formFail(hint, `instances[${i}] 必须带机器 os（linux / mac / windows）`, jsonEl);
+      return;
+    }
+    items[i].os = raw;
   }
 
   await withBusy($('#inst-batch-submit'), '同步中…', async () => {

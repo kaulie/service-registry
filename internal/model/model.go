@@ -29,6 +29,7 @@ type Instance struct {
 	Scheme       string            `json:"scheme"` // http | https | tcp
 	Host         string            `json:"host"`
 	Port         int               `json:"port"`
+	OS           string            `json:"os,omitempty"` // 机器 os：linux | mac | windows；登记必填
 	Metadata     map[string]string `json:"metadata,omitempty"`
 	Revision     int64             `json:"revision,omitempty"`
 	RegisteredAt time.Time         `json:"registeredAt"`

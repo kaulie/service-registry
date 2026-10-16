@@ -480,6 +480,22 @@ async function scenarioInstanceForm() {
   await click(dom, '#inst-form-submit');
   check(String(dom.q('#inst-form-hint').textContent).includes('不要带协议'), 'host 带协议时给出明确原因');
   check(dom.requests.filter((r) => r.method === 'POST').length === 0, '本地拦截，不发请求');
+
+  // host/port 合法但没选机器 OS，也要拦住，不能发出缺 os 的登记
+  dom.q('#inst-form-host').value = '10.0.0.7';
+  dom.q('#inst-form-port').value = '9099';
+  dom.q('#inst-form-os').value = '';
+  await click(dom, '#inst-form-submit');
+  check(String(dom.q('#inst-form-hint').textContent).includes('linux'), '缺机器 OS 时点明 linux/mac/windows');
+  check(dom.requests.filter((r) => r.method === 'POST').length === 0, '缺 os 时不发请求');
+
+  dom.q('#inst-form-os').value = 'linux';
+  await click(dom, '#inst-form-submit');
+  const posts = dom.requests.filter((r) => r.method === 'POST');
+  check(posts.length === 1, '选了 os 才发出登记请求');
+  const posted = posts[0] && JSON.parse(posts[0].body);
+  check(posted && posted.os === 'linux' && posted.host === '10.0.0.7' && posted.port === 9099,
+    '请求体带上机器 os：' + (posts[0] ? posts[0].body : '(无)'));
 }
 
 async function scenarioGlobalErrorHandlers() {

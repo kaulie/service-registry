@@ -15,6 +15,7 @@ type InstancePatch struct {
 	Scheme   *string
 	Host     *string
 	Port     *int
+	OS       *string
 	Metadata *map[string]string
 }
 
@@ -34,6 +35,9 @@ func (s *Store) UpdateInstance(ctx context.Context, namespace, service, id strin
 	if p.Port != nil {
 		next.Port = *p.Port
 	}
+	if p.OS != nil {
+		next.OS = *p.OS
+	}
 	if p.Metadata != nil {
 		next.Metadata = *p.Metadata
 	}
@@ -51,9 +55,9 @@ func (s *Store) UpdateInstance(ctx context.Context, namespace, service, id strin
 			return ErrConflict
 		}
 		if _, err := tx.ExecContext(ctx, `
-			UPDATE instances SET scheme = ?, host = ?, port = ?, metadata = ?, updated_at = ?, registered_by = ?
+			UPDATE instances SET scheme = ?, host = ?, port = ?, os = ?, metadata = ?, updated_at = ?, registered_by = ?
 			WHERE id = ?`,
-			next.Scheme, next.Host, next.Port, encodeMap(next.Metadata), formatTime(now), actor, id); err != nil {
+			next.Scheme, next.Host, next.Port, next.OS, encodeMap(next.Metadata), formatTime(now), actor, id); err != nil {
 			return err
 		}
 		rev, err := recordChange(ctx, tx, change{
@@ -157,7 +161,7 @@ func scanInstance(r rowScanner) (model.Instance, error) {
 		metadata             string
 		createdAt, updatedAt string
 	)
-	if err := r.Scan(&inst.ID, &inst.Namespace, &inst.Service, &inst.Scheme, &inst.Host, &inst.Port,
+	if err := r.Scan(&inst.ID, &inst.Namespace, &inst.Service, &inst.Scheme, &inst.Host, &inst.Port, &inst.OS,
 		&metadata, &inst.Revision, &createdAt, &updatedAt, &inst.RegisteredBy); err != nil {
 		return model.Instance{}, err
 	}

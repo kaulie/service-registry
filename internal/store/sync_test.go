@@ -81,6 +81,14 @@ func TestSyncInstancesDeclarative(t *testing.T) {
 		t.Fatalf("最终实例集合错误：%+v %v", list, err)
 	}
 
+	// 只改机器 os 也要记成更新（地址没变，但机器系统变了）。
+	res, err = st.SyncInstances(ctx, "ns", "svc", []model.Instance{
+		{Scheme: "http", Host: "10.0.0.2", Port: 80, OS: "linux", Metadata: map[string]string{"tier": "edge"}},
+	}, "ci")
+	if err != nil || res.Updated != 1 || res.Unchanged != 0 || len(res.Instances) != 1 || res.Instances[0].OS != "linux" {
+		t.Fatalf("只改 os 应记作更新：%+v %v", res, err)
+	}
+
 	// 空集合 = 全部摘除（CI 下线服务时用它一次清干净）。
 	res, err = st.SyncInstances(ctx, "ns", "svc", nil, "ci")
 	if err != nil || res.Deleted != 1 {

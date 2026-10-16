@@ -23,7 +23,7 @@ func TestOpenMigratesLegacyServicesTable(t *testing.T) {
 	legacy := strings.Replace(schema, "  git_repo_url  TEXT NOT NULL DEFAULT '',\n", "", 1)
 	legacy = strings.Replace(legacy, "  type          TEXT NOT NULL DEFAULT 'service',\n", "", 1)
 	legacy = strings.Replace(legacy, "  app_id        TEXT NOT NULL DEFAULT '',\n", "", 1)
-	legacy = strings.Replace(legacy, "  os            TEXT NOT NULL DEFAULT '',\n", "", 1)
+	legacy = strings.ReplaceAll(legacy, "  os            TEXT NOT NULL DEFAULT '',\n", "")
 	if legacy == schema {
 		t.Fatal("schema 里已经没有 git_repo_url/type/app_id/os 这些行了，本测试的前提失效（请更新测试）")
 	}
@@ -38,6 +38,11 @@ func TestOpenMigratesLegacyServicesTable(t *testing.T) {
 		`INSERT INTO services (namespace, name, created_at, updated_at)
 		 VALUES ('legacy', 'svc', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`); err != nil {
 		t.Fatalf("写入老数据失败：%v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO instances (id, namespace, service, scheme, host, port, created_at, updated_at)
+		 VALUES ('inst_legacy', 'legacy', 'svc', 'http', '127.0.0.1', 9, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`); err != nil {
+		t.Fatalf("写入老实例失败：%v", err)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("关闭老库失败：%v", err)
@@ -58,6 +63,13 @@ func TestOpenMigratesLegacyServicesTable(t *testing.T) {
 			t.Fatalf("迁移没有给老库的 services 补上 %s 列", col)
 		}
 	}
+	instCols, err := tableColumns(ctx, st.db, "instances")
+	if err != nil {
+		t.Fatalf("读取 instances 表结构失败：%v", err)
+	}
+	if !instCols["os"] {
+		t.Fatal("迁移没有给老库的 instances 补上 os 列")
+	}
 
 	// 老数据还在，新列取默认值（type=service，其余为空）。
 	svc, err := st.GetService(ctx, "legacy", "svc")
@@ -66,6 +78,13 @@ func TestOpenMigratesLegacyServicesTable(t *testing.T) {
 	}
 	if svc.GitRepoURL != "" || svc.Type != "service" || svc.AppID != "" || svc.OS != "" {
 		t.Fatalf("老数据的新列默认值不对：%+v", svc)
+	}
+	legacyInst, err := st.GetInstance(ctx, "inst_legacy")
+	if err != nil {
+		t.Fatalf("读取老实例失败：%v", err)
+	}
+	if legacyInst.OS != "" || legacyInst.Host != "127.0.0.1" {
+		t.Fatalf("老实例的 os 默认值不对：%+v", legacyInst)
 	}
 
 	// 迁移后写入/读回都要正常（含 app 类型字段）。

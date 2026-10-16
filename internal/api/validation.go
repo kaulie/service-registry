@@ -139,6 +139,30 @@ func normalizeOS(v string) (string, error) {
 	return "", fmt.Errorf("os 只支持 Android/iOS/MacOS/Windows/Linux：%q", v)
 }
 
+// allowedMachineOS 是实例所在机器的操作系统。和契约上 app 的 os 不是一回事：
+// 机器只有 linux / mac / windows，登记实例时必填。
+var allowedMachineOS = map[string]string{
+	"linux":   "linux",
+	"mac":     "mac",
+	"windows": "windows",
+}
+
+// normalizeMachineOS 归一化机器操作系统。required 为真时不允许留空
+// （新增实例 / 声明式同步里的每一条都走这条）。
+func normalizeMachineOS(v string, required bool) (string, error) {
+	key := strings.ToLower(strings.TrimSpace(v))
+	if key == "" {
+		if required {
+			return "", fmt.Errorf("登记实例必须指定机器操作系统（os），只支持 linux/mac/windows")
+		}
+		return "", nil
+	}
+	if canonical, ok := allowedMachineOS[key]; ok {
+		return canonical, nil
+	}
+	return "", fmt.Errorf("os 只支持 linux/mac/windows：%q", v)
+}
+
 func validateAppID(v string) error {
 	if utf8.RuneCountInString(v) > maxAppIDLen {
 		return fmt.Errorf("appId 过长（上限 %d 字符）", maxAppIDLen)
