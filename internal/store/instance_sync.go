@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"time"
 
@@ -41,7 +40,7 @@ func (s *Store) SyncInstances(ctx context.Context, namespace, service string, gi
 	res := SyncResult{Instances: []model.Instance{}}
 	now := time.Now().UTC()
 
-	err := s.write(ctx, func(tx *sql.Tx) error {
+	err := s.write(ctx, func(tx *sqlTx) error {
 		if err := assertServiceExists(ctx, tx, namespace, service); err != nil {
 			return err
 		}

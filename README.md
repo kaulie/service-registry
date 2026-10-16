@@ -362,7 +362,8 @@ toast / 部门目录 / 表单反馈），各自只放自己的逻辑：
 | `PORT` | 空 | 平台/容器常用的通用端口变量；只有 `SERVICE_PORT` 读不到时才用它 |
 | `REGISTRY_HTTP_ADDR` | 空 | 完整监听地址（如 `127.0.0.1:4240`）；给了它就不再关心上面的端口变量（优先级最高） |
 | `REGISTRY_BIND` | `127.0.0.1` | 未显式给地址时用的绑定 IP（端口仍来自 `SERVICE_PORT`/`PORT`） |
-| `REGISTRY_DB_PATH` | `./data/registry.db` | SQLite 路径（`:memory:` 用于测试） |
+| `REGISTRY_DB_PATH` | `./data/registry.db` | SQLite 路径（`:memory:` 用于测试）。设了 `REGISTRY_POSTGRES_DSN` 时不用它 |
+| `REGISTRY_POSTGRES_DSN` | 空 | PostgreSQL 连接串。非空时本进程的读写都走这库，不再打开 SQLite |
 | `REGISTRY_ADMIN_TOKEN` | 空* | admin 令牌；合法令牌会被记入审计（`actor=admin`） |
 | `REGISTRY_WRITE_AUTH` | **`open`** | 写接口是否要令牌：`open`（默认，无需令牌） / `token`（需令牌） |
 | `REGISTRY_READ_AUTH` | `open` | 读接口是否要令牌（`open` / `token`） |

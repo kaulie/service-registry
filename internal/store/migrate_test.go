@@ -55,7 +55,7 @@ func TestOpenMigratesLegacyServicesTable(t *testing.T) {
 	}
 	defer func() { _ = st.Close() }()
 
-	cols, err := tableColumns(ctx, st.db, "services")
+	cols, err := tableColumns(ctx, st.db, "services", st.pg)
 	if err != nil {
 		t.Fatalf("读取表结构失败：%v", err)
 	}
@@ -64,7 +64,7 @@ func TestOpenMigratesLegacyServicesTable(t *testing.T) {
 			t.Fatalf("迁移没有给老库的 services 补上 %s 列", col)
 		}
 	}
-	instCols, err := tableColumns(ctx, st.db, "instances")
+	instCols, err := tableColumns(ctx, st.db, "instances", st.pg)
 	if err != nil {
 		t.Fatalf("读取 instances 表结构失败：%v", err)
 	}

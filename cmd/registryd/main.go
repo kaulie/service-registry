@@ -34,9 +34,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	st, err := store.Open(cfg.DBPath)
+	var st *store.Store
+	if cfg.PostgresDSN != "" {
+		st, err = store.OpenPostgres(cfg.PostgresDSN)
+	} else {
+		st, err = store.Open(cfg.DBPath)
+	}
 	if err != nil {
-		log.Error("打开数据库失败", "path", cfg.DBPath, "err", err)
+		log.Error("打开数据库失败", "db", cfg.StoreLabel(), "err", err)
 		os.Exit(1)
 	}
 	defer func() { _ = st.Close() }()
@@ -85,7 +90,7 @@ func main() {
 	errc := make(chan error, 1)
 	go func() {
 		log.Info("service-registry 启动",
-			"addr", cfg.Addr(), "portFrom", cfg.PortSource, "db", cfg.DBPath, "version", version,
+			"addr", cfg.Addr(), "portFrom", cfg.PortSource, "db", cfg.StoreLabel(), "version", version,
 			"readAuthRequired", cfg.ReadAuthRequired, "defaultNamespace", cfg.DefaultNamespace)
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errc <- err

@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
 
 	"github.com/kaulie/service-registry/internal/model"
@@ -32,18 +33,30 @@ var (
 
 // Store 是持久化句柄。
 type Store struct {
-	db  *sql.DB
+	db  *sqlDB
 	hub *notify.Hub
+	// pg 为真时读写都走 PostgreSQL（占位符、JSON、自增列与 SQLite 不同）。
+	pg bool
 }
 
-// Open 打开（必要时创建）数据库并建表。
+// Open 打开（必要时创建）SQLite 并建表。
 func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", dsnFor(path))
+	return openSQL("sqlite", dsnFor(path), false, isMemory(path))
+}
+
+// OpenPostgres 打开 PostgreSQL。库需要事先建好；缺表时会按 postgresSchema 补上。
+// 读写都走这条连接，这样面板和登记接口看到的是同一份数据。
+func OpenPostgres(dsn string) (*Store, error) {
+	return openSQL("pgx", dsn, true, false)
+}
+
+func openSQL(driver, dsn string, pg, memory bool) (*Store, error) {
+	db, err := sql.Open(driver, dsn)
 	if err != nil {
 		return nil, fmt.Errorf("打开数据库失败：%w", err)
 	}
 	// 内存库必须单连接，否则每个连接看到的是各自独立的库。
-	if isMemory(path) {
+	if memory {
 		db.SetMaxOpenConns(1)
 	} else {
 		db.SetMaxOpenConns(8)
@@ -57,7 +70,7 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("连接数据库失败：%w", err)
 	}
-	s := &Store{db: db, hub: notify.New()}
+	s := &Store{db: &sqlDB{DB: db, pg: pg}, hub: notify.New(), pg: pg}
 	if err := s.migrate(ctx); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -104,7 +117,11 @@ func dsnFor(path string) string {
 }
 
 func (s *Store) migrate(ctx context.Context) error {
-	if _, err := s.db.ExecContext(ctx, schema); err != nil {
+	ddl := schema
+	if s.pg {
+		ddl = postgresSchema
+	}
+	if _, err := s.db.ExecContext(ctx, ddl); err != nil {
 		return fmt.Errorf("建表失败：%w", err)
 	}
 	if err := s.applyColumnMigrations(ctx); err != nil {
@@ -114,7 +131,7 @@ func (s *Store) migrate(ctx context.Context) error {
 }
 
 // write 在一个事务里执行 fn，并在提交后广播唤醒读者。
-func (s *Store) write(ctx context.Context, fn func(tx *sql.Tx) error) error {
+func (s *Store) write(ctx context.Context, fn func(tx *sqlTx) error) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -142,10 +159,15 @@ type change struct {
 }
 
 // recordChange 写入一条变更记录并返回其 revision（全局单调递增）。
-func recordChange(ctx context.Context, tx *sql.Tx, c change) (int64, error) {
-	res, err := tx.ExecContext(ctx,
-		`INSERT INTO changes (at, namespace, entity, ref, op, actor, detail) VALUES (?,?,?,?,?,?,?)`,
-		formatTime(time.Now()), c.Namespace, c.Entity, c.Ref, c.Op, c.Actor, c.Detail)
+func recordChange(ctx context.Context, tx *sqlTx, c change) (int64, error) {
+	const q = `INSERT INTO changes (at, namespace, entity, ref, op, actor, detail) VALUES (?,?,?,?,?,?,?)`
+	args := []any{formatTime(time.Now()), c.Namespace, c.Entity, c.Ref, c.Op, c.Actor, c.Detail}
+	if tx.pg {
+		var rev int64
+		err := tx.QueryRowContext(ctx, q+` RETURNING revision`, args...).Scan(&rev)
+		return rev, err
+	}
+	res, err := tx.ExecContext(ctx, q, args...)
 	if err != nil {
 		return 0, err
 	}

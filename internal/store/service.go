@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"time"
 
@@ -28,7 +27,7 @@ func (s *Store) UpsertService(ctx context.Context, in ServiceInput, actor string
 	now := time.Now().UTC()
 	created := false
 
-	err := s.write(ctx, func(tx *sql.Tx) error {
+	err := s.write(ctx, func(tx *sqlTx) error {
 		var exists int
 		if err := tx.QueryRowContext(ctx,
 			`SELECT COUNT(1) FROM services WHERE namespace = ? AND name = ?`, svc.Namespace, svc.Name).

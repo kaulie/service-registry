@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"time"
 
@@ -19,7 +18,7 @@ func (s *Store) CreateInstance(ctx context.Context, inst model.Instance, actor s
 		inst.ID = idgen.New(idgen.PrefixInstance)
 	}
 	now := time.Now().UTC()
-	err := s.write(ctx, func(tx *sql.Tx) error {
+	err := s.write(ctx, func(tx *sqlTx) error {
 		if err := assertServiceExists(ctx, tx, inst.Namespace, inst.Service); err != nil {
 			return err
 		}
