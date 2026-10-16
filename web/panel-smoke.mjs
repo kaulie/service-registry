@@ -29,6 +29,34 @@ function check(cond, what) {
   }
 }
 
+// 表格行里的按钮是 innerHTML 写进去的。冒烟 DOM 没有真正的 HTML 解析器，
+// 这里把 <button data-*> 抽出来，让「编辑 / 注销」能挂上点击并被测试点到。
+function buttonsInHTML(html) {
+  const out = [];
+  const re = /<button\b([^>]*)>([\s\S]*?)<\/button>/g;
+  let m;
+  while ((m = re.exec(html))) {
+    const btn = {
+      _handlers: {},
+      dataset: {},
+      textContent: m[2].replace(/<[^>]+>/g, ''),
+      className: '',
+      addEventListener(ev, fn) {
+        if (!btn._handlers[ev]) btn._handlers[ev] = [];
+        btn._handlers[ev].push(fn);
+      },
+    };
+    const attrRe = /([\w:-]+)="([^"]*)"/g;
+    let a;
+    while ((a = attrRe.exec(m[1]))) {
+      if (a[1] === 'class') btn.className = a[2];
+      else if (a[1].startsWith('data-')) btn.dataset[a[1].slice(5)] = a[2];
+    }
+    out.push(btn);
+  }
+  return out;
+}
+
 // ---- 受控 DOM ----
 function buildDom(scenario = {}, scripts = PANEL_SCRIPTS) {
   const handlers = new Map();
@@ -60,7 +88,13 @@ function buildDom(scenario = {}, scripts = PANEL_SCRIPTS) {
       appendChild(c) { el.children.push(c); return c; },
       remove() {},
       querySelector: (s) => makeEl(key + ' ' + s),
-      querySelectorAll: () => [],
+      querySelectorAll(sel) {
+        if (!el._buttons) el._buttons = buttonsInHTML(html);
+        if (sel === 'button[data-act]' || sel === 'button[data-id]') {
+          return el._buttons.filter((b) => (sel === 'button[data-act]' ? b.dataset.act : b.dataset.id));
+        }
+        return [];
+      },
       focus() {}, scrollIntoView() {}, setAttribute() {}, getAttribute() { return null; },
     };
     // 真实 DOM 里 innerHTML = '' 会移除所有子节点（列表重建就是靠它），这里保持一致，
@@ -68,7 +102,7 @@ function buildDom(scenario = {}, scripts = PANEL_SCRIPTS) {
     let html = '';
     Object.defineProperty(el, 'innerHTML', {
       get: () => html,
-      set: (v) => { html = v; el.children.length = 0; },
+      set: (v) => { html = v; el.children.length = 0; el._buttons = null; },
     });
     return el;
   }
@@ -122,6 +156,10 @@ function buildDom(scenario = {}, scripts = PANEL_SCRIPTS) {
       if (method === 'GET' && get) {
         return okText(get.raw !== undefined ? get.raw : JSON.stringify(get.body));
       }
+      if (method === 'GET' && /\/instances$/.test(base)) {
+        const instances = scenario.instances || [];
+        return okJSON({ instances, total: instances.length });
+      }
       // 契约编辑页：读单个契约（编辑模式回填）
       const hit = base.match(/^\/v1\/namespaces\/([^/]+)\/services\/([^/]+)(\/spec)?$/);
       if (method === 'GET' && hit) {
@@ -138,7 +176,7 @@ function buildDom(scenario = {}, scripts = PANEL_SCRIPTS) {
       const body = { created: true, service: { api: { hasSpec: true, endpoints: [{ method: 'GET', path: '/health' }] } } };
       return Promise.resolve({ ok: true, status: 201, text: () => Promise.resolve(JSON.stringify(body)) });
     },
-    JSON, Date, Math, Number, String, Object, Array, Promise, Error,
+    JSON, Date, Math, Number, String, Object, Array, Map, Promise, Error,
     encodeURIComponent, isNaN, parseInt, parseFloat,
   };
   sandbox.window = sandbox;
@@ -498,6 +536,54 @@ async function scenarioInstanceForm() {
     '请求体带上机器 os：' + (posts[0] ? posts[0].body : '(无)'));
 }
 
+async function scenarioEditInstance() {
+  console.log('\n场景：编辑已有实例（PATCH 这一条，不清空别的实例）');
+  const inst = {
+    id: 'inst_01',
+    scheme: 'https',
+    host: '10.0.0.7',
+    port: 9099,
+    os: 'linux',
+    arch: 'amd64',
+    metadata: { zone: 'edge' },
+    updatedAt: '2026-10-16T00:00:00Z',
+  };
+  const dom = buildDom({ instances: [inst] });
+  dom.q('#inst-service').value = 'default/event-center';
+  await click(dom, '#inst-refresh');
+  const wrap = dom.q('#inst-list').children.find((c) => c.className === 'item');
+  check(!!wrap && wrap.innerHTML.includes('编辑'), '实例行上有编辑按钮');
+  const edit = wrap && wrap.querySelectorAll('button[data-act]').find((b) => b.dataset.act === 'edit');
+  check(!!edit, '能点到这一条的编辑按钮');
+  const fns = (edit && edit._handlers && edit._handlers.click) || [];
+  for (const fn of fns) {
+    const r = fn();
+    if (r && typeof r.then === 'function') await r;
+  }
+  check(dom.q('#inst-form-card').hidden === false, '点编辑打开表单');
+  check(String(dom.q('#inst-form-title').textContent).includes('编辑实例 inst_01'),
+    '标题写明正在改哪一条：' + JSON.stringify(dom.q('#inst-form-title').textContent));
+  check(dom.q('#inst-form-scheme').value === 'https', '回填 scheme');
+  check(dom.q('#inst-form-host').value === '10.0.0.7', '回填 host');
+  check(dom.q('#inst-form-port').value === '9099', '回填 port');
+  check(dom.q('#inst-form-os').value === 'linux', '回填 os');
+  check(dom.q('#inst-form-arch').value === 'amd64', '回填 arch');
+  check(dom.q('#inst-form-meta').value === 'zone=edge', '回填 metadata');
+
+  dom.q('#inst-form-arch').value = '';
+  dom.q('#inst-form-meta').value = '';
+  dom.q('#inst-form-port').value = '9100';
+  await click(dom, '#inst-form-submit');
+  const patches = dom.requests.filter((r) => r.method === 'PATCH');
+  check(patches.length === 1 && patches[0].path.endsWith('/instances/inst_01'),
+    '保存走 PATCH 这一条：' + (patches[0] ? patches[0].path : '(无)'));
+  const body = patches[0] && JSON.parse(patches[0].body);
+  check(body && body.port === 9100 && body.os === 'linux' && body.arch === '' &&
+    body.metadata && Object.keys(body.metadata).length === 0,
+    '清空架构和 metadata 会显式清掉原值：' + (patches[0] ? patches[0].body : '(无)'));
+  check(dom.requests.filter((r) => r.method === 'PUT').length === 0, '编辑不会走整组同步');
+}
+
 async function scenarioGlobalErrorHandlers() {
   console.log('\n场景：脚本异常兜底（杜绝“没反应”）');
   const dom = buildDom();
@@ -849,6 +935,7 @@ for (const s of [
   scenarioSuccess,
   scenarioServerError,
   scenarioInstanceForm,
+  scenarioEditInstance,
   scenarioGlobalErrorHandlers,
   scenarioExpandedCardStaysOpen,
 ]) {
