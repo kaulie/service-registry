@@ -751,6 +751,7 @@ async function renderInstances() {
       <td class="mono">${esc(i.id)}</td>
       <td class="mono">${esc(i.scheme)}://${esc(i.host)}:${esc(i.port)}</td>
       <td class="mono">${esc(i.os || '')}</td>
+      <td class="mono">${esc(i.arch || '')}</td>
       <td class="mono">${esc(JSON.stringify(i.metadata || {}))}</td>
       <td>${esc(fmtTime(i.updatedAt))}</td>
       <td class="mono">${esc(i.registeredBy || '')}</td>
@@ -758,7 +759,7 @@ async function renderInstances() {
     </tr>`).join('');
   const wrap = el('div', 'item');
   wrap.innerHTML = `<table>
-    <thead><tr><th>ID</th><th>地址</th><th>机器 OS</th><th>metadata</th><th>更新时间</th><th>来源</th><th></th></tr></thead>
+    <thead><tr><th>ID</th><th>地址</th><th>机器 OS</th><th>架构</th><th>metadata</th><th>更新时间</th><th>来源</th><th></th></tr></thead>
     <tbody>${rows}</tbody></table>`;
   wrap.querySelectorAll('button[data-id]').forEach((btn) => {
     btn.addEventListener('click', async () => {
@@ -891,6 +892,7 @@ function openInstanceForm() {
   $('#inst-form-title').textContent = `新增实例 → ${target.ns}/${target.svc}`;
   $('#inst-form-scheme').value = 'http';
   $('#inst-form-os').value = '';
+  $('#inst-form-arch').value = '';
   ['host', 'port', 'meta'].forEach((k) => { $('#inst-form-' + k).value = ''; });
   setHint($('#inst-form-hint'), '');
   show($('#inst-form-card'), true);
@@ -920,7 +922,9 @@ async function submitInstanceForm() {
     return;
   }
 
+  const arch = $('#inst-form-arch').value.trim().toLowerCase();
   const body = { scheme: $('#inst-form-scheme').value, host, port, os };
+  if (arch) body.arch = arch;
   const meta = parseKV($('#inst-form-meta').value);
   if (Object.keys(meta).length) body.metadata = meta;
 
@@ -973,6 +977,12 @@ async function submitBatchForm() {
       return;
     }
     items[i].os = raw;
+    const arch = String((items[i] && items[i].arch) || '').trim().toLowerCase();
+    if (arch && !['amd64', 'x86_64', 'arm64', 'aarch64', '386', 'i386', 'i686', 'arm', 'armv7l'].includes(arch)) {
+      formFail(hint, `instances[${i}].arch 只支持 amd64 / arm64 / 386 / arm`, jsonEl);
+      return;
+    }
+    if (arch) items[i].arch = arch;
   }
 
   await withBusy($('#inst-batch-submit'), '同步中…', async () => {

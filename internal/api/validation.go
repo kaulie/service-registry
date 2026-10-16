@@ -163,6 +163,35 @@ func normalizeMachineOS(v string, required bool) (string, error) {
 	return "", fmt.Errorf("os 只支持 linux/mac/windows：%q", v)
 }
 
+// allowedMachineArch 是实例所在机器的 CPU 架构。部署平台用 os + arch 决定打包平台。
+// 留空表示还没登记；给出则必须是这四个值（uname 的 x86_64/aarch64 会收成 amd64/arm64）。
+var allowedMachineArch = map[string]string{
+	"amd64":   "amd64",
+	"x86_64":  "amd64",
+	"arm64":   "arm64",
+	"aarch64": "arm64",
+	"386":     "386",
+	"i386":    "386",
+	"i686":    "386",
+	"arm":     "arm",
+	"armv7l":  "arm",
+}
+
+// normalizeMachineArch 归一化机器架构。required 为真时不允许留空。
+func normalizeMachineArch(v string, required bool) (string, error) {
+	key := strings.ToLower(strings.TrimSpace(v))
+	if key == "" {
+		if required {
+			return "", fmt.Errorf("登记实例必须指定机器架构（arch），只支持 amd64/arm64/386/arm")
+		}
+		return "", nil
+	}
+	if canonical, ok := allowedMachineArch[key]; ok {
+		return canonical, nil
+	}
+	return "", fmt.Errorf("arch 只支持 amd64/arm64/386/arm：%q", v)
+}
+
 func validateAppID(v string) error {
 	if utf8.RuneCountInString(v) > maxAppIDLen {
 		return fmt.Errorf("appId 过长（上限 %d 字符）", maxAppIDLen)

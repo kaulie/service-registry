@@ -41,7 +41,7 @@ Namespace（隔离域）
                    · endpoints[]（method/path/summary/operationId/tags/auth）
         audit    : revision · created_at · updated_at · registered_by
       └─ Instance（声明，无状态位）
-           id · scheme · host · port · os(linux|mac|windows，登记必填) · metadata{} · revision
+           id · scheme · host · port · os(linux|mac|windows，登记必填) · arch(amd64|arm64|386|arm，可空) · metadata{} · revision
            · registered_at · updated_at · registered_by
 ```
 
@@ -82,6 +82,9 @@ Namespace（隔离域）
 - `os` 是**这台机器**的操作系统，登记时必填，只接受 `linux` / `mac` / `windows`
   （大小写不敏感，落库为小写）。它和契约上 app 的 `os`（Android/iOS/MacOS/…）不是同一个字段。
   升级前已经存在的实例这一列为空，下次声明式同步时必须补上。
+- `arch` 是这台机器的 CPU 架构，可空，取值 `amd64` / `arm64` / `386` / `arm`
+  （`x86_64`→`amd64`，`aarch64`→`arm64`）。部署平台在 `os` 和 `arch` 都有值时用它们决定打包平台；
+  老实例这一列为空，不补也不影响登记。
 - `PUT .../instances` 是**声明式**的：传期望集合，服务端 diff 出 create/update/delete，
   多余的一律摘除。CI/部署流水线调一次就完事，不需要任何常驻进程 ——
   这也正是"不需要心跳"之后，实例集合该怎么维护的答案。

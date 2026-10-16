@@ -24,8 +24,9 @@ func TestOpenMigratesLegacyServicesTable(t *testing.T) {
 	legacy = strings.Replace(legacy, "  type          TEXT NOT NULL DEFAULT 'service',\n", "", 1)
 	legacy = strings.Replace(legacy, "  app_id        TEXT NOT NULL DEFAULT '',\n", "", 1)
 	legacy = strings.ReplaceAll(legacy, "  os            TEXT NOT NULL DEFAULT '',\n", "")
+	legacy = strings.Replace(legacy, "  arch          TEXT NOT NULL DEFAULT '',\n", "", 1)
 	if legacy == schema {
-		t.Fatal("schema 里已经没有 git_repo_url/type/app_id/os 这些行了，本测试的前提失效（请更新测试）")
+		t.Fatal("schema 里已经没有 git_repo_url/type/app_id/os/arch 这些行了，本测试的前提失效（请更新测试）")
 	}
 	db, err := sql.Open("sqlite", "file:"+path)
 	if err != nil {
@@ -70,6 +71,9 @@ func TestOpenMigratesLegacyServicesTable(t *testing.T) {
 	if !instCols["os"] {
 		t.Fatal("迁移没有给老库的 instances 补上 os 列")
 	}
+	if !instCols["arch"] {
+		t.Fatal("迁移没有给老库的 instances 补上 arch 列")
+	}
 
 	// 老数据还在，新列取默认值（type=service，其余为空）。
 	svc, err := st.GetService(ctx, "legacy", "svc")
@@ -83,8 +87,8 @@ func TestOpenMigratesLegacyServicesTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("读取老实例失败：%v", err)
 	}
-	if legacyInst.OS != "" || legacyInst.Host != "127.0.0.1" {
-		t.Fatalf("老实例的 os 默认值不对：%+v", legacyInst)
+	if legacyInst.OS != "" || legacyInst.Arch != "" || legacyInst.Host != "127.0.0.1" {
+		t.Fatalf("老实例的 os/arch 默认值不对：%+v", legacyInst)
 	}
 
 	// 迁移后写入/读回都要正常（含 app 类型字段）。

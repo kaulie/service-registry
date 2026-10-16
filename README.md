@@ -82,8 +82,8 @@ JSON
 # 2) 声明实例集合（声明式整组对齐，CI/部署流水线一次性调用即可）
 curl -sS -X PUT $B/v1/namespaces/team-a/services/event-center/instances $J -H "$A" -d '{
   "instances":[
-    {"scheme":"http","host":"10.0.0.7","port":9099,"os":"linux","metadata":{"zone":"edge"}},
-    {"scheme":"http","host":"10.0.0.8","port":9099,"os":"mac","metadata":{"zone":"edge"}}
+    {"scheme":"http","host":"10.0.0.7","port":9099,"os":"linux","arch":"amd64","metadata":{"zone":"edge"}},
+    {"scheme":"http","host":"10.0.0.8","port":9099,"os":"mac","arch":"arm64","metadata":{"zone":"edge"}}
   ]}'
 # → {"created":2,"updated":0,"deleted":0,"unchanged":0,"instances":[...]}
 
