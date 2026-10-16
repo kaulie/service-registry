@@ -25,6 +25,7 @@
 #   ☆ REGISTRY_URL / REGISTRY_NS / REGISTRY_TOKEN
 #   ☆ DEPARTMENT_ID、REGISTRY_DEPARTMENT_ID 或 REGISTRY_DEPARTMENT_NAME（归属部门）
 #   ☆ INSTANCES     实例地址，逗号分隔（如 127.0.0.1:9099,10.0.0.7:9099）
+#   ☆ INSTANCE_OS / REGISTRY_INSTANCE_OS  机器 os：linux/mac/windows（不填则按本机 uname 推断）
 #   ☆ REGISTRY_SCRIPT  register.sh 路径（默认取与本脚本同级的 ../register.sh）
 set -euo pipefail
 
@@ -89,6 +90,8 @@ ARGS=(--service "${SERVICE_NAME}" --file "${SPEC_FILE}")
 [ -n "${DEPARTMENT_NAME:-}" ] && ARGS+=(--department-name "${DEPARTMENT_NAME}")
 [ -n "${TAGS:-}" ]            && for t in $(echo "${TAGS}" | tr ',' ' '); do ARGS+=(--tag "${t}"); done
 [ -n "${INSTANCES:-}" ]       && for i in $(echo "${INSTANCES}" | tr ',' ' '); do ARGS+=(--instance "${i}"); done
+INSTANCE_OS="${INSTANCE_OS:-${REGISTRY_INSTANCE_OS:-}}"
+[ -n "${INSTANCE_OS}" ]       && ARGS+=(--os "${INSTANCE_OS}")
 
 echo "==> 登记 ${SERVICE_NAME}（规范 ${SPEC_FILE}）"
 exec bash "${REGISTRY_SCRIPT}" ${ARGS[@]+"${ARGS[@]}"}

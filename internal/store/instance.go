@@ -10,7 +10,7 @@ import (
 	"github.com/kaulie/service-registry/internal/model"
 )
 
-const instanceColumns = `id, namespace, service, scheme, host, port, metadata, revision, created_at,
+const instanceColumns = `id, namespace, service, scheme, host, port, os, metadata, revision, created_at,
   updated_at, registered_by`
 
 // CreateInstance 新增一个实例声明（同地址已登记 → ErrConflict）。
@@ -34,10 +34,10 @@ func (s *Store) CreateInstance(ctx context.Context, inst model.Instance, actor s
 			return ErrConflict
 		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO instances (id, namespace, service, scheme, host, port, metadata, revision,
+			INSERT INTO instances (id, namespace, service, scheme, host, port, os, metadata, revision,
 			                       created_at, updated_at, registered_by)
-			VALUES (?,?,?,?,?,?,?,0,?,?,?)`,
-			inst.ID, inst.Namespace, inst.Service, inst.Scheme, inst.Host, inst.Port,
+			VALUES (?,?,?,?,?,?,?,?,0,?,?,?)`,
+			inst.ID, inst.Namespace, inst.Service, inst.Scheme, inst.Host, inst.Port, inst.OS,
 			encodeMap(inst.Metadata), formatTime(now), formatTime(now), actor); err != nil {
 			return err
 		}

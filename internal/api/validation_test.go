@@ -31,18 +31,18 @@ func TestValidationAndConflictErrors(t *testing.T) {
 	e.expectStatus(t, http.MethodPost, base, testAdminToken,
 		map[string]any{"scheme": "ftp", "host": "10.0.0.1", "port": 80}, http.StatusBadRequest)
 	e.expectStatus(t, http.MethodPost, "/v1/namespaces/team-a/services/ghost/instances", testAdminToken,
-		map[string]any{"scheme": "http", "host": "10.0.0.1", "port": 80}, http.StatusNotFound)
+		map[string]any{"scheme": "http", "host": "10.0.0.1", "port": 80, "os": "linux"}, http.StatusNotFound)
 
 	// 同地址重复登记 → 409。
 	e.expectStatus(t, http.MethodPost, base, testAdminToken,
-		map[string]any{"scheme": "http", "host": "10.0.0.1", "port": 80}, http.StatusCreated)
+		map[string]any{"scheme": "http", "host": "10.0.0.1", "port": 80, "os": "linux"}, http.StatusCreated)
 	e.expectStatus(t, http.MethodPost, base, testAdminToken,
-		map[string]any{"scheme": "http", "host": "10.0.0.1", "port": 80}, http.StatusConflict)
+		map[string]any{"scheme": "http", "host": "10.0.0.1", "port": 80, "os": "linux"}, http.StatusConflict)
 
 	// 同步的实例数上限。
 	tooMany := make([]map[string]any, 0, maxSyncInstances+1)
 	for i := 0; i <= maxSyncInstances; i++ {
-		tooMany = append(tooMany, map[string]any{"scheme": "http", "host": "10.0.1.1", "port": 1000 + i})
+		tooMany = append(tooMany, map[string]any{"scheme": "http", "host": "10.0.1.1", "port": 1000 + i, "os": "linux"})
 	}
 	e.expectStatus(t, http.MethodPut, base, testAdminToken, map[string]any{"instances": tooMany}, http.StatusBadRequest)
 
@@ -61,7 +61,7 @@ func TestPickRejectsUnsupportedMode(t *testing.T) {
 	e := newEnv(t, nil)
 	seedService(t, e)
 	e.ok(t, http.MethodPost, "/v1/namespaces/team-a/services/event-center/instances",
-		map[string]any{"scheme": "http", "host": "10.0.0.1", "port": 80})
+		map[string]any{"scheme": "http", "host": "10.0.0.1", "port": 80, "os": "linux"})
 	// 只保留无状态的 random：round_robin/weighted 在多消费方共用的注册中心里语义不成立。
 	e.expectStatus(t, http.MethodGet,
 		"/v1/namespaces/team-a/services/event-center/instances?pick=round_robin",

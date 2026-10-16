@@ -82,8 +82,8 @@ JSON
 # 2) 声明实例集合（声明式整组对齐，CI/部署流水线一次性调用即可）
 curl -sS -X PUT $B/v1/namespaces/team-a/services/event-center/instances $J -H "$A" -d '{
   "instances":[
-    {"scheme":"http","host":"10.0.0.7","port":9099,"metadata":{"zone":"edge"}},
-    {"scheme":"http","host":"10.0.0.8","port":9099,"metadata":{"zone":"edge"}}
+    {"scheme":"http","host":"10.0.0.7","port":9099,"os":"linux","metadata":{"zone":"edge"}},
+    {"scheme":"http","host":"10.0.0.8","port":9099,"os":"mac","metadata":{"zone":"edge"}}
   ]}'
 # → {"created":2,"updated":0,"deleted":0,"unchanged":0,"instances":[...]}
 
@@ -107,7 +107,7 @@ curl -sS $B/v1/namespaces/team-a/services/event-center/spec -o openapi.yaml
 ```bash
 REGISTRY_TOKEN=rt_xxx client/register.sh \
   --service event-center --file api/openapi.yaml \
-  --instance 10.0.0.7:9099 --instance 10.0.0.8:9099 \
+  --instance 10.0.0.7:9099 --instance 10.0.0.8:9099 --os linux \
   --owner kaulie --version 1.4.2 --tag events \
   --git-repo https://github.com/kaulie/event-center.git \
   --department D0001   # 归属部门（ID 或 --department-name 名称；服务端按组织接口对齐）

@@ -23,11 +23,11 @@ func TestServiceLifecycleAndDiscovery(t *testing.T) {
 
 	// 实例：单个登记 + 声明式同步。
 	e.expectStatus(t, http.MethodPost, "/v1/namespaces/team-a/services/event-center/instances",
-		testAdminToken, map[string]any{"scheme": "http", "host": "10.0.0.1", "port": 9099}, http.StatusCreated)
+		testAdminToken, map[string]any{"scheme": "http", "host": "10.0.0.1", "port": 9099, "os": "linux"}, http.StatusCreated)
 	sync := e.ok(t, http.MethodPut, "/v1/namespaces/team-a/services/event-center/instances", map[string]any{
 		"instances": []map[string]any{
-			{"scheme": "http", "host": "10.0.0.1", "port": 9099, "metadata": map[string]string{"zone": "a"}},
-			{"scheme": "http", "host": "10.0.0.2", "port": 9099, "metadata": map[string]string{"zone": "b"}},
+			{"scheme": "http", "host": "10.0.0.1", "port": 9099, "os": "linux", "metadata": map[string]string{"zone": "a"}},
+			{"scheme": "http", "host": "10.0.0.2", "port": 9099, "os": "mac", "metadata": map[string]string{"zone": "b"}},
 		},
 	})
 	if sync["updated"].(float64) != 1 || sync["created"].(float64) != 1 {

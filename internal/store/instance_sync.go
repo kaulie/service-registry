@@ -73,10 +73,10 @@ func (s *Store) SyncInstances(ctx context.Context, namespace, service string, gi
 					id = idgen.New(idgen.PrefixInstance)
 				}
 				if _, err := tx.ExecContext(ctx, `
-					INSERT INTO instances (id, namespace, service, scheme, host, port, metadata, revision,
+					INSERT INTO instances (id, namespace, service, scheme, host, port, os, metadata, revision,
 					                       created_at, updated_at, registered_by)
-					VALUES (?,?,?,?,?,?,?,0,?,?,?)`,
-					id, namespace, service, want.Scheme, want.Host, want.Port,
+					VALUES (?,?,?,?,?,?,?,?,0,?,?,?)`,
+					id, namespace, service, want.Scheme, want.Host, want.Port, want.OS,
 					encodeMap(want.Metadata), formatTime(now), formatTime(now), actor); err != nil {
 					return err
 				}
@@ -100,15 +100,15 @@ func (s *Store) SyncInstances(ctx context.Context, namespace, service string, gi
 
 			seen[cur.ID] = true
 			if cur.Scheme == want.Scheme && cur.Host == want.Host && cur.Port == want.Port &&
-				sameMetadata(cur.Metadata, want.Metadata) {
+				cur.OS == want.OS && sameMetadata(cur.Metadata, want.Metadata) {
 				res.Unchanged++
 				res.Instances = append(res.Instances, cur)
 				continue
 			}
 			if _, err := tx.ExecContext(ctx, `
-				UPDATE instances SET scheme = ?, host = ?, port = ?, metadata = ?, updated_at = ?, registered_by = ?
+				UPDATE instances SET scheme = ?, host = ?, port = ?, os = ?, metadata = ?, updated_at = ?, registered_by = ?
 				WHERE id = ?`,
-				want.Scheme, want.Host, want.Port, encodeMap(want.Metadata), formatTime(now), actor, cur.ID); err != nil {
+				want.Scheme, want.Host, want.Port, want.OS, encodeMap(want.Metadata), formatTime(now), actor, cur.ID); err != nil {
 				return err
 			}
 			rev, err := recordChange(ctx, tx, change{
@@ -125,7 +125,7 @@ func (s *Store) SyncInstances(ctx context.Context, namespace, service string, gi
 			res.Updated++
 			res.Instances = append(res.Instances, model.Instance{
 				ID: cur.ID, Namespace: namespace, Service: service,
-				Scheme: want.Scheme, Host: want.Host, Port: want.Port, Metadata: want.Metadata,
+				Scheme: want.Scheme, Host: want.Host, Port: want.Port, OS: want.OS, Metadata: want.Metadata,
 				Revision: rev, RegisteredAt: cur.RegisteredAt, UpdatedAt: now, RegisteredBy: actor,
 			})
 		}

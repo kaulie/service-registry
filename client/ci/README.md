@@ -42,6 +42,7 @@ swag init -g cmd/event-center/main.go -o docs       # 产物 docs/swagger.json
 SERVICE_NAME=event-center INSTANCES=127.0.0.1:9099 \
 DEPARTMENT_ID=D0005 OWNER=kaulie VERSION=1.4.2 \
   bash client/ci/register-go-service.sh
+# 实例的机器 os（linux/mac/windows）不填时按本机 uname 推断；要指定就加 INSTANCE_OS=linux
 ```
 
 ## 3. 挂到 CI

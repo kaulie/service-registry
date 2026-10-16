@@ -34,6 +34,7 @@ jobs:
           REGISTRY_TOKEN: ${{ secrets.REGISTRY_NS_TOKEN }}   # 收紧写权限后才需要
           DEPARTMENT_ID: D0005                 # ← 归属部门 ID（见 GET /v1/departments）
           INSTANCES: 127.0.0.1:9099            # ← 实例地址，逗号分隔
+          # INSTANCE_OS: linux               # ← 机器 os：linux/mac/windows；不填则按 runner 的 uname 推断
           OWNER: xxx
           HEALTH_PATH: /health
           TAGS: events

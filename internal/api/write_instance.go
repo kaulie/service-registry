@@ -14,6 +14,7 @@ type instanceWrite struct {
 	Scheme   string            `json:"scheme"`
 	Host     string            `json:"host"`
 	Port     int               `json:"port"`
+	OS       string            `json:"os"`
 	Metadata map[string]string `json:"metadata"`
 }
 
@@ -31,8 +32,12 @@ func (iw instanceWrite) toModel() (model.Instance, error) {
 	if err := validateMetadata(iw.Metadata); err != nil {
 		return model.Instance{}, err
 	}
+	os, err := normalizeMachineOS(iw.OS, true)
+	if err != nil {
+		return model.Instance{}, err
+	}
 	return model.Instance{
-		ID: iw.ID, Scheme: scheme, Host: iw.Host, Port: iw.Port, Metadata: iw.Metadata,
+		ID: iw.ID, Scheme: scheme, Host: iw.Host, Port: iw.Port, OS: os, Metadata: iw.Metadata,
 	}, nil
 }
 
@@ -118,7 +123,7 @@ func (s *Server) handleSyncInstances(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, res)
 }
 
-// handlePatchInstance 部分更新实例（scheme/host/port/metadata）。
+// handlePatchInstance 部分更新实例（scheme/host/port/os/metadata）。
 func (s *Server) handlePatchInstance(w http.ResponseWriter, r *http.Request) {
 	nsName, svcName, id := r.PathValue("ns"), r.PathValue("svc"), r.PathValue("id")
 	rl, ok := s.requireWrite(w, r, nsName)
@@ -129,6 +134,7 @@ func (s *Server) handlePatchInstance(w http.ResponseWriter, r *http.Request) {
 		Scheme   *string            `json:"scheme"`
 		Host     *string            `json:"host"`
 		Port     *int               `json:"port"`
+		OS       *string            `json:"os"`
 		Metadata *map[string]string `json:"metadata"`
 	}
 	if !s.decodeJSON(w, r, &body) {
@@ -156,6 +162,14 @@ func (s *Server) handlePatchInstance(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		patch.Port = body.Port
+	}
+	if body.OS != nil {
+		os, err := normalizeMachineOS(*body.OS, true)
+		if err != nil {
+			s.writeError(w, r, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
+		patch.OS = &os
 	}
 	if body.Metadata != nil {
 		if err := validateMetadata(*body.Metadata); err != nil {

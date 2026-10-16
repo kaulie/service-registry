@@ -8,7 +8,7 @@
 #
 # 用法：
 #   client/register.sh --service event-center --file api/openapi.yaml \
-#       --instance 127.0.0.1:9099 --instance 10.0.0.7:9099 \
+#       --instance 127.0.0.1:9099 --instance 10.0.0.7:9099 --os linux \
 #       --owner kaulie --version 1.4.2 --tag events
 #
 #   # 带上代码仓库地址（不传则默认取本地 git 的 remote.origin.url）
@@ -40,6 +40,8 @@
 #   REGISTRY_GIT_REPO 代码仓库地址（等价于 --git-repo；都不给时取 remote.origin.url）
 #   REGISTRY_DEPARTMENT_ID    归属部门 ID（等价于 --department/--department-id）
 #   REGISTRY_DEPARTMENT_NAME  归属部门名（等价于 --department-name）
+#   REGISTRY_INSTANCE_OS      实例所在机器的 os：linux / mac / windows（等价于 --os；
+#                             登记实例时必填，不给则按本机 uname 推断）
 #   SERVICE_PORT      注册中心监听端口（与服务端同一个变量；用于推导默认 URL）
 set -euo pipefail
 
@@ -61,6 +63,8 @@ NO_GIT_REPO=0
 DEPARTMENT_ID="${REGISTRY_DEPARTMENT_ID:-}"
 DEPARTMENT_NAME="${REGISTRY_DEPARTMENT_NAME:-}"
 SCHEME="http"
+# 实例所在机器的操作系统。登记实例时必填（linux/mac/windows）；留空则按本机 uname 推断。
+INSTANCE_OS="${REGISTRY_INSTANCE_OS:-}"
 INSTANCES=()
 TAGS=()
 NO_CONTRACT=0
@@ -90,6 +94,7 @@ while [ $# -gt 0 ]; do
     --department-id)   DEPARTMENT_ID="${2:?}"; shift 2 ;;
     --department-name) DEPARTMENT_NAME="${2:?}"; shift 2 ;;
     --scheme)       SCHEME="${2:?}"; shift 2 ;;
+    --os)           INSTANCE_OS="${2:?}"; shift 2 ;;
     --ns)           NS="${2:?}"; shift 2 ;;
     --url)          REGISTRY_URL="${2:?}"; shift 2 ;;
     --token)        REGISTRY_TOKEN="${2:?}"; shift 2 ;;
@@ -211,7 +216,27 @@ if [ "${NO_INSTANCES}" -eq 0 ]; then
   if [ "${#INSTANCES[@]}" -eq 0 ]; then
     echo "==> 未提供 --instance：跳过实例登记（若要清空实例集合，请显式传 --instance-set-empty）"
   else
-    payload="$(SCHEME="${SCHEME}" INSTANCES="$(IFS=,; echo "${INSTANCES[*]}")" python3 - <<'PY'
+    if [ -z "${INSTANCE_OS}" ]; then
+      case "$(uname -s 2>/dev/null || true)" in
+        Linux) INSTANCE_OS=linux ;;
+        Darwin) INSTANCE_OS=mac ;;
+        MINGW*|MSYS*|CYGWIN*) INSTANCE_OS=windows ;;
+      esac
+      if [ -n "${INSTANCE_OS}" ]; then
+        echo "==> 实例 os 取自本机 $(uname -s)：${INSTANCE_OS}"
+        echo "    （覆盖用 --os linux|mac|windows，或环境变量 REGISTRY_INSTANCE_OS）"
+      fi
+    fi
+    case "$(printf '%s' "${INSTANCE_OS}" | tr '[:upper:]' '[:lower:]')" in
+      linux) INSTANCE_OS=linux ;;
+      mac) INSTANCE_OS=mac ;;
+      windows) INSTANCE_OS=windows ;;
+      *)
+        echo "登记实例必须指定机器 os（linux/mac/windows）。请加 --os，或设置 REGISTRY_INSTANCE_OS。" >&2
+        exit 1
+        ;;
+    esac
+    payload="$(SCHEME="${SCHEME}" INSTANCE_OS="${INSTANCE_OS}" INSTANCES="$(IFS=,; echo "${INSTANCES[*]}")" python3 - <<'PY'
 import json, os
 
 items = []
@@ -223,7 +248,12 @@ for raw in os.environ["INSTANCES"].split(","):
         host, port = raw.rsplit(":", 1)
     else:
         host, port = raw, "80"
-    items.append({"scheme": os.environ["SCHEME"], "host": host, "port": int(port)})
+    items.append({
+        "scheme": os.environ["SCHEME"],
+        "host": host,
+        "port": int(port),
+        "os": os.environ["INSTANCE_OS"],
+    })
 print(json.dumps({"instances": items}))
 PY
 )"

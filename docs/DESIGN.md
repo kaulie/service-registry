@@ -41,7 +41,7 @@ Namespace（隔离域）
                    · endpoints[]（method/path/summary/operationId/tags/auth）
         audit    : revision · created_at · updated_at · registered_by
       └─ Instance（声明，无状态位）
-           id · scheme · host · port · metadata{} · revision
+           id · scheme · host · port · os(linux|mac|windows，登记必填) · metadata{} · revision
            · registered_at · updated_at · registered_by
 ```
 
@@ -79,6 +79,9 @@ Namespace（隔离域）
 ### 2.3 实例身份与声明式同步
 
 - 身份：显式 `id`（`inst_<ULID>`，字典序即时间序）或 `(scheme,host,port)` 的唯一约束。
+- `os` 是**这台机器**的操作系统，登记时必填，只接受 `linux` / `mac` / `windows`
+  （大小写不敏感，落库为小写）。它和契约上 app 的 `os`（Android/iOS/MacOS/…）不是同一个字段。
+  升级前已经存在的实例这一列为空，下次声明式同步时必须补上。
 - `PUT .../instances` 是**声明式**的：传期望集合，服务端 diff 出 create/update/delete，
   多余的一律摘除。CI/部署流水线调一次就完事，不需要任何常驻进程 ——
   这也正是"不需要心跳"之后，实例集合该怎么维护的答案。
