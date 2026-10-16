@@ -60,6 +60,11 @@ var columnMigrations = []columnMigration{
 		Column: "os",
 		DDL:    `ALTER TABLE instances ADD COLUMN os TEXT NOT NULL DEFAULT ''`,
 	},
+	{
+		Table:  "instances",
+		Column: "arch",
+		DDL:    `ALTER TABLE instances ADD COLUMN arch TEXT NOT NULL DEFAULT ''`,
+	},
 }
 
 // applyColumnMigrations 幂等地把缺的列补上（SQLite 没有 ADD COLUMN IF NOT EXISTS）。

@@ -8,7 +8,7 @@
 #
 # 用法：
 #   client/register.sh --service event-center --file api/openapi.yaml \
-#       --instance 127.0.0.1:9099 --instance 10.0.0.7:9099 --os linux \
+#       --instance 127.0.0.1:9099 --instance 10.0.0.7:9099 --os linux --arch amd64 \
 #       --owner kaulie --version 1.4.2 --tag events
 #
 #   # 带上代码仓库地址（不传则默认取本地 git 的 remote.origin.url）
@@ -42,6 +42,8 @@
 #   REGISTRY_DEPARTMENT_NAME  归属部门名（等价于 --department-name）
 #   REGISTRY_INSTANCE_OS      实例所在机器的 os：linux / mac / windows（等价于 --os；
 #                             登记实例时必填，不给则按本机 uname 推断）
+#   REGISTRY_INSTANCE_ARCH    实例架构：amd64 / arm64 / 386 / arm（等价于 --arch；
+#                             不给则按本机 uname -m 推断，推断不出就省略）
 #   SERVICE_PORT      注册中心监听端口（与服务端同一个变量；用于推导默认 URL）
 set -euo pipefail
 
@@ -65,6 +67,8 @@ DEPARTMENT_NAME="${REGISTRY_DEPARTMENT_NAME:-}"
 SCHEME="http"
 # 实例所在机器的操作系统。登记实例时必填（linux/mac/windows）；留空则按本机 uname 推断。
 INSTANCE_OS="${REGISTRY_INSTANCE_OS:-}"
+# 实例架构。可空（amd64/arm64/386/arm）；留空则按本机 uname -m 推断。
+INSTANCE_ARCH="${REGISTRY_INSTANCE_ARCH:-}"
 INSTANCES=()
 TAGS=()
 NO_CONTRACT=0
@@ -95,6 +99,7 @@ while [ $# -gt 0 ]; do
     --department-name) DEPARTMENT_NAME="${2:?}"; shift 2 ;;
     --scheme)       SCHEME="${2:?}"; shift 2 ;;
     --os)           INSTANCE_OS="${2:?}"; shift 2 ;;
+    --arch)         INSTANCE_ARCH="${2:?}"; shift 2 ;;
     --ns)           NS="${2:?}"; shift 2 ;;
     --url)          REGISTRY_URL="${2:?}"; shift 2 ;;
     --token)        REGISTRY_TOKEN="${2:?}"; shift 2 ;;
@@ -236,10 +241,35 @@ if [ "${NO_INSTANCES}" -eq 0 ]; then
         exit 1
         ;;
     esac
-    payload="$(SCHEME="${SCHEME}" INSTANCE_OS="${INSTANCE_OS}" INSTANCES="$(IFS=,; echo "${INSTANCES[*]}")" python3 - <<'PY'
+    if [ -z "${INSTANCE_ARCH}" ]; then
+      case "$(uname -m 2>/dev/null || true)" in
+        x86_64|amd64) INSTANCE_ARCH=amd64 ;;
+        aarch64|arm64) INSTANCE_ARCH=arm64 ;;
+        i386|i686) INSTANCE_ARCH=386 ;;
+        arm|armv7l|armv6l) INSTANCE_ARCH=arm ;;
+      esac
+      if [ -n "${INSTANCE_ARCH}" ]; then
+        echo "==> 实例 arch 取自本机 $(uname -m)：${INSTANCE_ARCH}"
+        echo "    （覆盖用 --arch amd64|arm64|386|arm，或环境变量 REGISTRY_INSTANCE_ARCH）"
+      fi
+    fi
+    if [ -n "${INSTANCE_ARCH}" ]; then
+      case "$(printf '%s' "${INSTANCE_ARCH}" | tr '[:upper:]' '[:lower:]')" in
+        amd64|x86_64) INSTANCE_ARCH=amd64 ;;
+        arm64|aarch64) INSTANCE_ARCH=arm64 ;;
+        386|i386|i686) INSTANCE_ARCH=386 ;;
+        arm|armv7l|armv6l) INSTANCE_ARCH=arm ;;
+        *)
+          echo "实例 arch 只支持 amd64/arm64/386/arm。请改 --arch，或设置 REGISTRY_INSTANCE_ARCH。" >&2
+          exit 1
+          ;;
+      esac
+    fi
+    payload="$(SCHEME="${SCHEME}" INSTANCE_OS="${INSTANCE_OS}" INSTANCE_ARCH="${INSTANCE_ARCH}" INSTANCES="$(IFS=,; echo "${INSTANCES[*]}")" python3 - <<'PY'
 import json, os
 
 items = []
+arch = os.environ.get("INSTANCE_ARCH", "")
 for raw in os.environ["INSTANCES"].split(","):
     raw = raw.strip()
     if not raw:
@@ -248,12 +278,15 @@ for raw in os.environ["INSTANCES"].split(","):
         host, port = raw.rsplit(":", 1)
     else:
         host, port = raw, "80"
-    items.append({
+    item = {
         "scheme": os.environ["SCHEME"],
         "host": host,
         "port": int(port),
         "os": os.environ["INSTANCE_OS"],
-    })
+    }
+    if arch:
+        item["arch"] = arch
+    items.append(item)
 print(json.dumps({"instances": items}))
 PY
 )"

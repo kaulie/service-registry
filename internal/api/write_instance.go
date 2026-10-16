@@ -15,6 +15,7 @@ type instanceWrite struct {
 	Host     string            `json:"host"`
 	Port     int               `json:"port"`
 	OS       string            `json:"os"`
+	Arch     string            `json:"arch"`
 	Metadata map[string]string `json:"metadata"`
 }
 
@@ -36,8 +37,12 @@ func (iw instanceWrite) toModel() (model.Instance, error) {
 	if err != nil {
 		return model.Instance{}, err
 	}
+	arch, err := normalizeMachineArch(iw.Arch, false)
+	if err != nil {
+		return model.Instance{}, err
+	}
 	return model.Instance{
-		ID: iw.ID, Scheme: scheme, Host: iw.Host, Port: iw.Port, OS: os, Metadata: iw.Metadata,
+		ID: iw.ID, Scheme: scheme, Host: iw.Host, Port: iw.Port, OS: os, Arch: arch, Metadata: iw.Metadata,
 	}, nil
 }
 
@@ -135,6 +140,7 @@ func (s *Server) handlePatchInstance(w http.ResponseWriter, r *http.Request) {
 		Host     *string            `json:"host"`
 		Port     *int               `json:"port"`
 		OS       *string            `json:"os"`
+		Arch     *string            `json:"arch"`
 		Metadata *map[string]string `json:"metadata"`
 	}
 	if !s.decodeJSON(w, r, &body) {
@@ -170,6 +176,14 @@ func (s *Server) handlePatchInstance(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		patch.OS = &os
+	}
+	if body.Arch != nil {
+		arch, err := normalizeMachineArch(*body.Arch, false)
+		if err != nil {
+			s.writeError(w, r, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
+		patch.Arch = &arch
 	}
 	if body.Metadata != nil {
 		if err := validateMetadata(*body.Metadata); err != nil {

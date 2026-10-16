@@ -580,7 +580,7 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
     patch:
       tags: [register]
-      summary: 部分更新实例（scheme/host/port/os/metadata）
+      summary: 部分更新实例（scheme/host/port/os/arch/metadata）
       requestBody:
         content:
           application/json:
@@ -591,6 +591,7 @@ paths:
                 host: { type: string }
                 port: { type: integer }
                 os: { type: string, enum: [linux, mac, windows], description: 机器操作系统；给出则必须是 linux/mac/windows }
+                arch: { type: string, enum: [amd64, arm64, 386, arm], description: 机器架构；给出则必须是 amd64/arm64/386/arm（x86_64→amd64，aarch64→arm64）；空字符串表示清空 }
                 metadata: { type: object, additionalProperties: { type: string } }
       responses:
         '200':
@@ -851,6 +852,10 @@ components:
           type: string
           enum: [linux, mac, windows]
           description: 实例所在机器的操作系统。新登记的实例必有此值；升级前的老实例可能为空。
+        arch:
+          type: string
+          enum: [amd64, arm64, 386, arm]
+          description: 实例所在机器的 CPU 架构。可空；部署平台在 os 与 arch 都有值时用它们决定打包平台。
         metadata: { type: object, additionalProperties: { type: string } }
         revision: { type: integer, format: int64 }
         registeredAt: { type: string, format: date-time }
@@ -869,6 +874,9 @@ components:
           type: string
           enum: [linux, mac, windows]
           description: 实例所在机器的操作系统，登记时必填（大小写不敏感，存成小写）
+        arch:
+          type: string
+          description: 实例所在机器的架构，可空。给出时收成 amd64/arm64/386/arm（x86_64、aarch64 等等价写法也会收）
         metadata: { type: object, additionalProperties: { type: string } }
 
     SyncResult:

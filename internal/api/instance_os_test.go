@@ -74,6 +74,57 @@ func TestInstanceMachineOSRequired(t *testing.T) {
 		map[string]any{"os": "ios"}, http.StatusBadRequest)
 }
 
+// TestInstanceArchOptional 校验架构可以不填；填了只接受 amd64/arm64/386/arm，并收成规范值。
+func TestInstanceArchOptional(t *testing.T) {
+	e := newEnv(t, nil)
+	seedService(t, e)
+	base := "/v1/namespaces/team-a/services/event-center/instances"
+
+	created := e.ok(t, http.MethodPost, base, map[string]any{
+		"scheme": "http", "host": "10.0.0.1", "port": 80, "os": "linux", "arch": "x86_64",
+	})
+	inst := created["instance"].(map[string]any)
+	if inst["arch"] != "amd64" {
+		t.Fatalf("x86_64 应收成 amd64：%v", inst)
+	}
+	mac := e.ok(t, http.MethodPost, base, map[string]any{
+		"scheme": "http", "host": "10.0.0.2", "port": 80, "os": "mac", "arch": "AARCH64",
+	})
+	if mac["instance"].(map[string]any)["arch"] != "arm64" {
+		t.Fatalf("AARCH64 应收成 arm64：%v", mac)
+	}
+	bare := e.ok(t, http.MethodPost, base, map[string]any{
+		"scheme": "http", "host": "10.0.0.3", "port": 80, "os": "linux",
+	})
+	if _, ok := bare["instance"].(map[string]any)["arch"]; ok {
+		t.Fatalf("不填 arch 时响应里不应带空架构：%v", bare)
+	}
+
+	bad := e.expectStatus(t, http.MethodPost, base, testAdminToken,
+		map[string]any{"scheme": "http", "host": "10.0.0.4", "port": 80, "os": "linux", "arch": "sparc"},
+		http.StatusBadRequest)
+	if msg := errMessage(bad); !strings.Contains(msg, "amd64/arm64/386/arm") {
+		t.Fatalf("非法 arch 应点明取值：%v", bad)
+	}
+
+	synced := e.ok(t, http.MethodPut, base, map[string]any{
+		"instances": []map[string]any{
+			{"scheme": "http", "host": "10.0.0.1", "port": 80, "os": "linux", "arch": "arm64"},
+		},
+	})
+	if synced["updated"].(float64) != 1 {
+		t.Fatalf("只改 arch 应记作更新：%v", synced)
+	}
+	listed := e.ok(t, http.MethodGet, base, nil)
+	got := listed["instances"].([]any)
+	if len(got) != 1 || got[0].(map[string]any)["arch"] != "arm64" {
+		t.Fatalf("同步后的 arch 不正确：%v", listed)
+	}
+	id := got[0].(map[string]any)["id"].(string)
+	e.expectStatus(t, http.MethodPatch, base+"/"+id, testAdminToken,
+		map[string]any{"arch": "ppc64"}, http.StatusBadRequest)
+}
+
 func errMessage(out map[string]any) string {
 	errObj, _ := out["error"].(map[string]any)
 	msg, _ := errObj["message"].(string)

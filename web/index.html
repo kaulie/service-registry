@@ -133,9 +133,18 @@
               <option value="windows">windows</option>
             </select>
           </label>
+          <label>架构
+            <select id="inst-form-arch">
+              <option value="">不指定</option>
+              <option value="amd64">amd64</option>
+              <option value="arm64">arm64</option>
+              <option value="386">386</option>
+              <option value="arm">arm</option>
+            </select>
+          </label>
           <label class="grow">metadata（k=v，逗号分隔） <input type="text" id="inst-form-meta" placeholder="zone=edge,tier=web" /></label>
         </div>
-        <p class="note">机器 OS 必填（linux / mac / windows），记的是这台机器的系统。本中心不会去访问这个地址，可达性由调用方自行校验。</p>
+        <p class="note">机器 OS 必填（linux / mac / windows）。架构可选，取值 amd64 / arm64 / 386 / arm，部署平台用它和 OS 一起决定打包平台。本中心不会去访问这个地址，可达性由调用方自行校验。</p>
         <div class="actions" style="margin-top:8px">
           <button class="btn btn--primary" id="inst-form-submit" type="button">提交</button>
           <button class="btn" id="inst-form-cancel" type="button">取消</button>
