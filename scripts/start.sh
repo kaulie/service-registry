@@ -108,7 +108,11 @@ fi
 : "${REGISTRY_ORG_URL:=http://127.0.0.1:4244}"
 export REGISTRY_ORG_URL
 
-log "启动 部署版本=${APP_VERSION} 监听=${REGISTRY_HTTP_ADDR} 库=${REGISTRY_DB_PATH} 部门源=${REGISTRY_ORG_URL}"
+DB_LABEL="${REGISTRY_DB_PATH}"
+if [ -n "${REGISTRY_POSTGRES_DSN:-}" ]; then
+  DB_LABEL="postgres"
+fi
+log "启动 部署版本=${APP_VERSION} 监听=${REGISTRY_HTTP_ADDR} 库=${DB_LABEL} 部门源=${REGISTRY_ORG_URL}"
 nohup "${BIN}" >> "${LOG_FILE}" 2>&1 &
 echo $! > "${PID_FILE}"
 pid="$(cat "${PID_FILE}")"

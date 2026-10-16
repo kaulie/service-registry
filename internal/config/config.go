@@ -17,8 +17,10 @@ type Config struct {
 	// PortSource 记录监听端口的来源：`SERVICE_PORT` / `PORT` / `REGISTRY_HTTP_ADDR` /
 	// `default`。只用于启动日志与排查"为什么起在这个端口"。
 	PortSource string
-	// DBPath SQLite 文件路径（":memory:" 用于测试）。
+	// DBPath SQLite 文件路径（":memory:" 用于测试）。PostgresDSN 非空时不使用。
 	DBPath string
+	// PostgresDSN 非空时，本进程的读写都走这串 PostgreSQL 连接，不再打开 SQLite。
+	PostgresDSN string
 	// AdminToken 管理令牌；为空则管理接口不鉴权（仅开发/本机）。
 	AdminToken string
 	// WriteAuthOpen 为真时**写接口默认开放**：不带令牌也能登记/维护/管理。
@@ -75,6 +77,7 @@ func Load() (Config, error) {
 	c := Config{
 		HTTPAddr:            env("REGISTRY_HTTP_ADDR", ""),
 		DBPath:              env("REGISTRY_DB_PATH", "./data/registry.db"),
+		PostgresDSN:         strings.TrimSpace(env("REGISTRY_POSTGRES_DSN", "")),
 		AdminToken:          env("REGISTRY_ADMIN_TOKEN", ""),
 		DefaultNamespace:    env("REGISTRY_DEFAULT_NS", "default"),
 		ChangeRetentionDays: 0,
@@ -84,6 +87,13 @@ func Load() (Config, error) {
 		SSEKeepAlive:        20 * time.Second,
 		MaxSpecBytes:        256 * 1024,
 		ShutdownTimeout:     10 * time.Second,
+	}
+
+	if c.PostgresDSN != "" {
+		u, err := url.Parse(c.PostgresDSN)
+		if err != nil || (u.Scheme != "postgres" && u.Scheme != "postgresql") || u.Host == "" {
+			return c, fmt.Errorf("REGISTRY_POSTGRES_DSN 不是合法的 postgres 连接串")
+		}
 	}
 
 	if c.HTTPAddr == "" {
@@ -170,6 +180,22 @@ func Load() (Config, error) {
 
 // Addr 是监听地址的便捷别名。
 func (c Config) Addr() string { return c.HTTPAddr }
+
+// StoreLabel 是启动日志里的库位置。PostgreSQL 只打印主机和库名，不带口令。
+func (c Config) StoreLabel() string {
+	if c.PostgresDSN == "" {
+		return c.DBPath
+	}
+	u, err := url.Parse(c.PostgresDSN)
+	if err != nil || u.Host == "" {
+		return "postgres"
+	}
+	name := strings.TrimPrefix(u.Path, "/")
+	if name == "" {
+		return "postgres://" + u.Host
+	}
+	return "postgres://" + u.Host + "/" + name
+}
 
 // DefaultPort 是没有任何端口环境变量时的默认监听端口。
 const DefaultPort = "4240"

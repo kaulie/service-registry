@@ -12,6 +12,7 @@ func TestLoadDefaultsAndEnvOverrides(t *testing.T) {
 	t.Setenv("SERVICE_PORT", "")
 	t.Setenv("PORT", "")
 	t.Setenv("REGISTRY_DB_PATH", "")
+	t.Setenv("REGISTRY_POSTGRES_DSN", "")
 	t.Setenv("REGISTRY_READ_AUTH", "")
 	t.Setenv("REGISTRY_DEFAULT_NS", "")
 	cfg, err := Load()

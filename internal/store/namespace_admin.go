@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"time"
 
 	"github.com/kaulie/service-registry/internal/model"
@@ -13,7 +12,7 @@ func (s *Store) UpdateNamespace(ctx context.Context, name string, description *s
 	if _, _, err := s.GetNamespace(ctx, name); err != nil {
 		return model.Namespace{}, err
 	}
-	err := s.write(ctx, func(tx *sql.Tx) error {
+	err := s.write(ctx, func(tx *sqlTx) error {
 		if description != nil {
 			if _, err := tx.ExecContext(ctx,
 				`UPDATE namespaces SET description = ?, updated_at = ? WHERE name = ?`,
@@ -42,7 +41,7 @@ func (s *Store) SetNamespaceToken(ctx context.Context, name, tokenHash, actor, d
 	if _, _, err := s.GetNamespace(ctx, name); err != nil {
 		return err
 	}
-	return s.write(ctx, func(tx *sql.Tx) error {
+	return s.write(ctx, func(tx *sqlTx) error {
 		if _, err := tx.ExecContext(ctx,
 			`UPDATE namespaces SET token_hash = ?, updated_at = ? WHERE name = ?`,
 			tokenHash, formatTime(time.Now()), name); err != nil {
@@ -61,7 +60,7 @@ func (s *Store) DeleteNamespace(ctx context.Context, name, actor string) error {
 	if _, _, err := s.GetNamespace(ctx, name); err != nil {
 		return err
 	}
-	return s.write(ctx, func(tx *sql.Tx) error {
+	return s.write(ctx, func(tx *sqlTx) error {
 		for _, q := range []string{
 			`DELETE FROM instances WHERE namespace = ?`,
 			`DELETE FROM endpoints WHERE namespace = ?`,

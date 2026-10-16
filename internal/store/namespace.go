@@ -21,7 +21,7 @@ func (s *Store) CreateNamespace(ctx context.Context, name, description, tokenHas
 	}
 	now := time.Now().UTC()
 	var out model.Namespace
-	err := s.write(ctx, func(tx *sql.Tx) error {
+	err := s.write(ctx, func(tx *sqlTx) error {
 		var exists int
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(1) FROM namespaces WHERE name = ?`, name).Scan(&exists); err != nil {
 			return err

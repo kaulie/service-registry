@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"strings"
 
@@ -30,7 +29,7 @@ type ServiceFilter struct {
 
 // ListServices 返回服务契约列表与满足条件的总数。
 func (s *Store) ListServices(ctx context.Context, f ServiceFilter) ([]model.Service, int, error) {
-	where, args := serviceWhere(f)
+	where, args := s.serviceWhere(f)
 
 	var total int
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM services `+where, args...).Scan(&total); err != nil {
@@ -79,7 +78,16 @@ func (s *Store) ListServices(ctx context.Context, f ServiceFilter) ([]model.Serv
 	return out, total, nil
 }
 
-func serviceWhere(f ServiceFilter) (string, []any) {
+// jsonValueEquals 判断 JSON 数组列里有没有某个字符串。
+// tags / protocols 在两边都按 TEXT 存 JSON 数组；SQLite 用 json_each，PostgreSQL 用 json_array_elements_text。
+func (s *Store) jsonValueEquals(column string) string {
+	if s.pg {
+		return "EXISTS (SELECT 1 FROM json_array_elements_text(CASE WHEN " + column + " = '' THEN '[]' ELSE " + column + " END::json) AS value WHERE value = ?)"
+	}
+	return "EXISTS (SELECT 1 FROM json_each(" + column + ") WHERE value = ?)"
+}
+
+func (s *Store) serviceWhere(f ServiceFilter) (string, []any) {
 	var clauses []string
 	var args []any
 	if f.Namespace != "" {
@@ -87,7 +95,7 @@ func serviceWhere(f ServiceFilter) (string, []any) {
 		args = append(args, f.Namespace)
 	}
 	if f.Tag != "" {
-		clauses = append(clauses, "EXISTS (SELECT 1 FROM json_each(services.tags) WHERE value = ?)")
+		clauses = append(clauses, s.jsonValueEquals("services.tags"))
 		args = append(args, f.Tag)
 	}
 	if f.Owner != "" {
@@ -95,7 +103,7 @@ func serviceWhere(f ServiceFilter) (string, []any) {
 		args = append(args, f.Owner)
 	}
 	if f.Protocol != "" {
-		clauses = append(clauses, "EXISTS (SELECT 1 FROM json_each(services.protocols) WHERE value = ?)")
+		clauses = append(clauses, s.jsonValueEquals("services.protocols"))
 		args = append(args, f.Protocol)
 	}
 	if f.Department != "" {
@@ -103,11 +111,19 @@ func serviceWhere(f ServiceFilter) (string, []any) {
 		args = append(args, f.Department, f.Department)
 	}
 	if f.OrgID != "" {
-		clauses = append(clauses, "department_id COLLATE NOCASE = ?")
+		if s.pg {
+			clauses = append(clauses, "lower(department_id) = lower(?)")
+		} else {
+			clauses = append(clauses, "department_id COLLATE NOCASE = ?")
+		}
 		args = append(args, f.OrgID)
 	}
 	if f.Query != "" {
-		clauses = append(clauses, "(name LIKE ? OR description LIKE ? OR owner LIKE ? OR version LIKE ? OR git_repo_url LIKE ? OR department_name LIKE ? OR department_id LIKE ?)")
+		op := "LIKE"
+		if s.pg {
+			op = "ILIKE"
+		}
+		clauses = append(clauses, "(name "+op+" ? OR description "+op+" ? OR owner "+op+" ? OR version "+op+" ? OR git_repo_url "+op+" ? OR department_name "+op+" ? OR department_id "+op+" ?)")
 		like := "%" + f.Query + "%"
 		args = append(args, like, like, like, like, like, like, like)
 	}
@@ -120,7 +136,7 @@ func serviceWhere(f ServiceFilter) (string, []any) {
 // DeleteService 删除服务及其端点索引与实例（显式级联）。
 func (s *Store) DeleteService(ctx context.Context, namespace, name, actor string) error {
 	ref := namespace + "/" + name
-	return s.write(ctx, func(tx *sql.Tx) error {
+	return s.write(ctx, func(tx *sqlTx) error {
 		var exists int
 		if err := tx.QueryRowContext(ctx,
 			`SELECT COUNT(1) FROM services WHERE namespace = ? AND name = ?`, namespace, name).Scan(&exists); err != nil {

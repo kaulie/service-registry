@@ -47,7 +47,7 @@ func (s *Store) UpdateInstance(ctx context.Context, namespace, service, id strin
 	}
 	now := time.Now().UTC()
 
-	err = s.write(ctx, func(tx *sql.Tx) error {
+	err = s.write(ctx, func(tx *sqlTx) error {
 		var dup int
 		if err := tx.QueryRowContext(ctx, `
 			SELECT COUNT(1) FROM instances
@@ -87,7 +87,7 @@ func (s *Store) DeleteInstance(ctx context.Context, namespace, service, id, acto
 	if err != nil {
 		return err
 	}
-	return s.write(ctx, func(tx *sql.Tx) error {
+	return s.write(ctx, func(tx *sqlTx) error {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM instances WHERE id = ?`, id); err != nil {
 			return err
 		}
@@ -140,7 +140,7 @@ func (s *Store) instanceIn(ctx context.Context, namespace, service, id string) (
 	return inst, err
 }
 
-func listInstancesTx(ctx context.Context, tx *sql.Tx, namespace, service string) ([]model.Instance, error) {
+func listInstancesTx(ctx context.Context, tx *sqlTx, namespace, service string) ([]model.Instance, error) {
 	rows, err := tx.QueryContext(ctx,
 		`SELECT `+instanceColumns+` FROM instances WHERE namespace = ? AND service = ? ORDER BY id`,
 		namespace, service)
@@ -178,7 +178,7 @@ func addrKey(scheme, host string, port int) string {
 	return fmt.Sprintf("%s|%s|%d", scheme, host, port)
 }
 
-func assertServiceExists(ctx context.Context, tx *sql.Tx, namespace, service string) error {
+func assertServiceExists(ctx context.Context, tx *sqlTx, namespace, service string) error {
 	var n int
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COUNT(1) FROM services WHERE namespace = ? AND name = ?`, namespace, service).Scan(&n); err != nil {

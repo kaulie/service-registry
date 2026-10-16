@@ -74,7 +74,7 @@ func (s *Store) applyColumnMigrations(ctx context.Context) error {
 		cols, ok := cache[m.Table]
 		if !ok {
 			var err error
-			cols, err = tableColumns(ctx, s.db, m.Table)
+			cols, err = tableColumns(ctx, s.db, m.Table, s.pg)
 			if err != nil {
 				return fmt.Errorf("读取表 %s 的结构失败：%w", m.Table, err)
 			}
@@ -93,12 +93,22 @@ func (s *Store) applyColumnMigrations(ctx context.Context) error {
 
 var identRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-// tableColumns 返回表的列名集合（走 pragma_table_info 表值函数）。
-func tableColumns(ctx context.Context, db *sql.DB, table string) (map[string]bool, error) {
+type columnQuerier interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
+// tableColumns 返回表的列名集合。SQLite 走 pragma_table_info；PostgreSQL 走 information_schema。
+func tableColumns(ctx context.Context, db columnQuerier, table string, pg bool) (map[string]bool, error) {
 	if !identRe.MatchString(table) {
 		return nil, fmt.Errorf("非法的表名：%q", table)
 	}
-	rows, err := db.QueryContext(ctx, `SELECT name FROM pragma_table_info('`+table+`')`)
+	q := `SELECT name FROM pragma_table_info('` + table + `')`
+	var args []any
+	if pg {
+		q = `SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = ?`
+		args = []any{table}
+	}
+	rows, err := db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
