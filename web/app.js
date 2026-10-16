@@ -1,7 +1,7 @@
 'use strict';
 
 // Service Registry 控制面板（index.html）：纯原生 JS，所有数据都通过公开只读接口拉取。
-// 写操作（创建命名空间 / 轮换令牌 / 删除实例）需要令牌，填写在右上角。
+// 写操作（创建命名空间 / 轮换令牌 / 编辑或删除实例）需要令牌，填写在右上角。
 //
 // 这里只放"面板"自己的东西：页签、服务目录、服务树、实例、变更、命名空间、事件流。
 // 与契约编辑页（contract.html + contract.js）共用的工具在 shared.js（先于本文件加载）：
@@ -755,15 +755,24 @@ async function renderInstances() {
       <td class="mono">${esc(JSON.stringify(i.metadata || {}))}</td>
       <td>${esc(fmtTime(i.updatedAt))}</td>
       <td class="mono">${esc(i.registeredBy || '')}</td>
-      <td><button class="btn btn--small btn--danger" data-id="${esc(i.id)}">注销</button></td>
+      <td>
+        <button class="btn btn--small" data-act="edit" data-id="${esc(i.id)}">编辑</button>
+        <button class="btn btn--small btn--danger" data-act="delete" data-id="${esc(i.id)}">注销</button>
+      </td>
     </tr>`).join('');
   const wrap = el('div', 'item');
   wrap.innerHTML = `<table>
     <thead><tr><th>ID</th><th>地址</th><th>机器 OS</th><th>架构</th><th>metadata</th><th>更新时间</th><th>来源</th><th></th></tr></thead>
     <tbody>${rows}</tbody></table>`;
-  wrap.querySelectorAll('button[data-id]').forEach((btn) => {
+  const byId = new Map(instances.map((i) => [i.id, i]));
+  wrap.querySelectorAll('button[data-act]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const id = btn.dataset.id;
+      if (btn.dataset.act === 'edit') {
+        const inst = byId.get(id);
+        if (inst) openInstanceForm(inst);
+        return;
+      }
       if (!confirm('确认注销实例 ' + id + '？')) return;
       const r = await api(`/v1/namespaces/${encodeURIComponent(ns)}/services/${encodeURIComponent(svc)}/instances/${encodeURIComponent(id)}`, { method: 'DELETE' });
       if (r.ok) { toast('已注销'); renderInstances(); } else { toast('注销失败：' + JSON.stringify(r.data), true); }
@@ -877,7 +886,10 @@ function toggleStream() {
   };
 }
 
-// ---- 面板写入口：新增实例 / 声明式批量同步 ----
+// ---- 面板写入口：新增 / 编辑实例 / 声明式批量同步 ----
+// 非空表示表单正在改这一条，提交走 PATCH；空表示新增，提交走 POST。
+let editingInstanceId = '';
+
 function currentService() {
   const sel = $('#inst-service').value;
   if (!sel) { toast('先在上面的下拉里选一个服务', true); return null; }
@@ -885,15 +897,25 @@ function currentService() {
   return { ns, svc, base: `/v1/namespaces/${encodeURIComponent(ns)}/services/${encodeURIComponent(svc)}` };
 }
 
-function openInstanceForm() {
+function formatKV(meta) {
+  return Object.entries(meta || {}).map(([k, v]) => k + '=' + v).join(',');
+}
+
+function openInstanceForm(inst) {
   const target = currentService();
   if (!target) return;
   show($('#inst-batch-card'), false);
-  $('#inst-form-title').textContent = `新增实例 → ${target.ns}/${target.svc}`;
-  $('#inst-form-scheme').value = 'http';
-  $('#inst-form-os').value = '';
-  $('#inst-form-arch').value = '';
-  ['host', 'port', 'meta'].forEach((k) => { $('#inst-form-' + k).value = ''; });
+  editingInstanceId = inst && inst.id ? inst.id : '';
+  $('#inst-form-title').textContent = editingInstanceId
+    ? `编辑实例 ${editingInstanceId} → ${target.ns}/${target.svc}`
+    : `新增实例 → ${target.ns}/${target.svc}`;
+  $('#inst-form-submit').textContent = editingInstanceId ? '保存' : '提交';
+  $('#inst-form-scheme').value = (inst && inst.scheme) || 'http';
+  $('#inst-form-host').value = (inst && inst.host) || '';
+  $('#inst-form-port').value = inst && inst.port ? String(inst.port) : '';
+  $('#inst-form-os').value = (inst && inst.os) || '';
+  $('#inst-form-arch').value = (inst && inst.arch) || '';
+  $('#inst-form-meta').value = formatKV(inst && inst.metadata);
   setHint($('#inst-form-hint'), '');
   show($('#inst-form-card'), true);
 }
@@ -923,16 +945,29 @@ async function submitInstanceForm() {
   }
 
   const arch = $('#inst-form-arch').value.trim().toLowerCase();
-  const body = { scheme: $('#inst-form-scheme').value, host, port, os };
-  if (arch) body.arch = arch;
   const meta = parseKV($('#inst-form-meta').value);
-  if (Object.keys(meta).length) body.metadata = meta;
+  const editing = editingInstanceId;
+  const body = { scheme: $('#inst-form-scheme').value, host, port, os };
+  // 编辑时 arch / metadata 始终带上：清空表示删掉原来的值，而不是“这次不改”。
+  if (editing) {
+    body.arch = arch;
+    body.metadata = meta;
+  } else {
+    if (arch) body.arch = arch;
+    if (Object.keys(meta).length) body.metadata = meta;
+  }
 
   await withBusy($('#inst-form-submit'), '提交中…', async () => {
-    const res = await api(`${target.base}/instances`, { method: 'POST', body });
-    if (!res.ok) { formFail(hint, '新增实例失败：' + errText(res.data)); return; }
+    const res = editing
+      ? await api(`${target.base}/instances/${encodeURIComponent(editing)}`, { method: 'PATCH', body })
+      : await api(`${target.base}/instances`, { method: 'POST', body });
+    if (!res.ok) {
+      formFail(hint, (editing ? '保存实例失败：' : '新增实例失败：') + errText(res.data));
+      return;
+    }
     setHint(hint, '');
-    toast(`已登记实例 ${body.scheme}://${host}:${port}`);
+    toast(editing ? `已更新实例 ${body.scheme}://${host}:${port}` : `已登记实例 ${body.scheme}://${host}:${port}`);
+    editingInstanceId = '';
     show(card, false);
     renderInstances();
   });
@@ -1016,12 +1051,20 @@ $('#api-search').addEventListener('click', renderSearch);
 $('#api-path').addEventListener('keydown', (e) => { if (e.key === 'Enter') renderSearch(); });
 $('#api-dept').addEventListener('change', renderSearch);
 $('#inst-refresh').addEventListener('click', renderInstances);
-$('#inst-service').addEventListener('change', renderInstances);
+$('#inst-service').addEventListener('change', () => {
+  editingInstanceId = '';
+  show($('#inst-form-card'), false);
+  renderInstances();
+});
 // 登记 / 编辑契约在独立页面（contract.html）里做，面板这边只是两个链接：
 // #svc-new（工具条）与每张卡片上的「编辑契约」；不用 JS 接管点击，
 // 保留新页签/新窗口/复制链接地址这些浏览器原生能力。
-$('#inst-new').addEventListener('click', openInstanceForm);
-$('#inst-form-cancel').addEventListener('click', () => show($('#inst-form-card'), false));
+$('#inst-new').addEventListener('click', () => openInstanceForm());
+$('#inst-form-cancel').addEventListener('click', () => {
+  editingInstanceId = '';
+  $('#inst-form-submit').textContent = '提交';
+  show($('#inst-form-card'), false);
+});
 $('#inst-form-submit').addEventListener('click', submitInstanceForm);
 $('#inst-batch').addEventListener('click', openBatchForm);
 $('#inst-batch-cancel').addEventListener('click', () => show($('#inst-batch-card'), false));
