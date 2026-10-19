@@ -54,44 +54,59 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	ticker := time.NewTicker(s.cfg.SSEKeepAlive)
 	defer ticker.Stop()
 
+	// 先拿到下一轮广播的 channel，再按游标读库。
+	// 反过来会丢事件：写入发生在 Wait 之前时，这次广播已经换过 channel，
+	// 循环却还在等下一次写入。
 	for {
+		if r.Context().Err() != nil {
+			return
+		}
+		wait := s.store.Hub().Wait()
+		if !s.pushSSEChanges(w, flusher, r, ns, svc, &last) {
+			return
+		}
 		select {
 		case <-r.Context().Done():
 			return
 		case <-ticker.C:
 			fmt.Fprint(w, ": ping\n\n")
 			flusher.Flush()
-		case <-s.store.Hub().Wait():
-			changes, _, err := s.store.Changes(r.Context(), store.ChangeFilter{
-				Since: last, Namespace: ns, Limit: sseMaxBatch,
-			})
-			if err != nil {
-				if r.Context().Err() != nil {
-					return
-				}
-				s.writeSSE(w, "error", map[string]any{"message": err.Error()})
-				flusher.Flush()
-				return
-			}
-			sent := 0
-			for _, c := range changes {
-				if svc != "" && !changeMatchesService(c, ns, svc) {
-					// 游标照常前进：只过滤推送，不阻塞后续变更。
-					last = c.Revision
-					continue
-				}
-				s.writeSSE(w, "change", c)
-				last = c.Revision
-				sent++
-			}
-			if notes := maxRev(changes); notes > last {
-				last = notes
-			}
-			if sent > 0 || len(changes) > 0 {
-				flusher.Flush()
-			}
+		case <-wait:
 		}
 	}
+}
+
+// pushSSEChanges 把游标之后的变更写进这条 SSE。返回 false 表示连接该结束了。
+func (s *Server) pushSSEChanges(w http.ResponseWriter, flusher http.Flusher, r *http.Request, ns, svc string, last *int64) bool {
+	changes, _, err := s.store.Changes(r.Context(), store.ChangeFilter{
+		Since: *last, Namespace: ns, Limit: sseMaxBatch,
+	})
+	if err != nil {
+		if r.Context().Err() != nil {
+			return false
+		}
+		s.writeSSE(w, "error", map[string]any{"message": err.Error()})
+		flusher.Flush()
+		return false
+	}
+	sent := 0
+	for _, c := range changes {
+		if svc != "" && !changeMatchesService(c, ns, svc) {
+			// 游标照常前进：只过滤推送，不阻塞后续变更。
+			*last = c.Revision
+			continue
+		}
+		s.writeSSE(w, "change", c)
+		*last = c.Revision
+		sent++
+	}
+	if notes := maxRev(changes); notes > *last {
+		*last = notes
+	}
+	if sent > 0 || len(changes) > 0 {
+		flusher.Flush()
+	}
+	return true
 }
 
 func (s *Server) writeSSE(w http.ResponseWriter, event string, payload any) {
