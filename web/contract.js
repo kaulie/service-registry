@@ -106,6 +106,7 @@ function resetForNew() {
   field('name').disabled = false;
   ['name', 'version', 'owner', 'health', 'desc', 'tags', 'docs', 'repo', 'specurl', 'spec']
     .forEach((k) => { field(k).value = ''; });
+  field('mcp').value = '/mcp';
   field('type').value = 'service';
   field('appid').value = '';
   field('os').value = 'Android';
@@ -137,6 +138,7 @@ async function loadForEdit() {
   field('version').value = svc.version || '';
   field('owner').value = svc.owner || '';
   field('health').value = svc.healthPath || '';
+  field('mcp').value = svc.mcpPath || '/mcp';
   field('desc').value = svc.description || '';
   field('type').value = svc.type || 'service';
   field('appid').value = svc.appId || '';
@@ -261,6 +263,12 @@ async function submitContract() {
     formFail(hint, 'healthPath 必须以 / 开头（它是元信息，供消费方/看门狗自行探活）：' + health, healthEl);
     return;
   }
+  const mcpEl = field('mcp');
+  const mcpPath = mcpEl.value.trim() || '/mcp';
+  if (!mcpPath.startsWith('/') || /\s/.test(mcpPath) || mcpPath.includes('://')) {
+    formFail(hint, 'MCP 地址必须是以 / 开头的路径（默认 /mcp）：' + mcpPath, mcpEl);
+    return;
+  }
 
   // 注册对象类型：service 是后端服务；app 时 APP_ID 与操作系统必填（与后端校验一致）。
   const typeEl = field('type');
@@ -286,6 +294,7 @@ async function submitContract() {
     owner: field('owner').value.trim(),
     description: field('desc').value.trim(),
     healthPath: health,
+    mcpPath,
     api: apiPart,
   };
   if (type === 'app') {

@@ -24,7 +24,7 @@
 | 提供查询 / 反查 / 快照 / 增量游标 / SSE 实时订阅给所有平台 | **不保证可用性**：不返回"健康/up"状态，可达性由消费方自行校验 |
 | 独立控制面板（原生 HTML/CSS/JS，同端口托管） | 不做多节点集群/选主/federation（单实例、唯一真源） |
 
-契约里的 `gitRepoUrl` / `healthPath` / `docsUrl` / `specUrl` **只是元信息字段**：本中心存着它们，
+契约里的 `gitRepoUrl` / `healthPath` / `mcpPath` / `docsUrl` / `specUrl` **只是元信息字段**：本中心存着它们，
 供消费方或 watchdog 自行使用，本中心自己不会去访问（**不 clone 代码仓库**、不发任何请求）。
 
 同一套语义也适用于**归属部门**：本中心**不维护部门数据**，部门以组织架构服务
@@ -68,7 +68,7 @@ curl -sS -X PUT $B/v1/namespaces/team-a/services/event-center $J -H "$A" -d @- <
 {
   "version": "1.4.2", "owner": "kaulie", "description": "统一事件中心",
   "gitRepoUrl": "https://github.com/kaulie/event-center.git",
-  "tags": ["events", "pubsub"], "healthPath": "/health",
+  "tags": ["events", "pubsub"], "healthPath": "/health", "mcpPath": "/mcp",
   "api": {
     "protocols": ["http"],
     "authSchemes": [{"scheme":"bearer","in":"header","name":"Authorization"}],

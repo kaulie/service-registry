@@ -314,6 +314,7 @@ async function scenarioContractPageNew() {
   check(dom.q('#svc-form-mode').value === 'spec', '默认走「粘贴 OpenAPI」');
   check(dom.q('#svc-form-spec').value.includes('openapi: 3.0.3'), 'API 原文已预填最小模板（不粘贴 spec 也能提交成功）');
   check(dom.q('#svc-form-repo').value === '', '新登记时代码仓库输入框是空的（这个字段可选）');
+  check(dom.q('#svc-form-mcp').value === '/mcp', '新登记时 MCP 地址默认 /mcp');
   check(dom.q('#svc-form-name').disabled !== true, '新登记时服务名可填');
 }
 
@@ -356,6 +357,7 @@ async function scenarioContractEditFromURL() {
   check(body.departmentId === 'D0001' && body.departmentName === 'SRE部门',
     '部门照旧带上（不会因为"没重新选"被清掉）');
   check(body.api.spec.includes('title: event-center'), '内联 spec 原文原样带回（编辑不会把 spec 弄丢）');
+  check(body.mcpPath === '/mcp', '没写过 MCP 地址时提交默认 /mcp');
 }
 
 

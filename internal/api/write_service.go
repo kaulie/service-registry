@@ -30,7 +30,9 @@ type serviceWrite struct {
 	Tags           []string `json:"tags"`
 	BasePath       string   `json:"basePath"`
 	HealthPath     string   `json:"healthPath"`
-	API            apiWrite `json:"api"`
+	// MCPPath 是服务的 MCP 地址（相对实例根路径）。空则收成 /mcp。
+	MCPPath string   `json:"mcpPath"`
+	API     apiWrite `json:"api"`
 }
 
 type apiWrite struct {
@@ -141,6 +143,7 @@ func buildServiceInput(nsName, svcName string, body serviceWrite) (store.Service
 		Tags:           trimAll(body.Tags),
 		BasePath:       strings.TrimSpace(body.BasePath),
 		HealthPath:     strings.TrimSpace(body.HealthPath),
+		MCPPath:        body.MCPPath,
 	}
 	in.Service.API = body.API.ServiceAPI
 	in.Service.API.Protocols = trimAll(in.Service.API.Protocols)
@@ -253,5 +256,26 @@ func validateServiceWrite(body *serviceWrite, maxSpecBytes int) error {
 	if hp := strings.TrimSpace(body.HealthPath); hp != "" && !strings.HasPrefix(hp, "/") {
 		return errString("healthPath 必须以 / 开头（它是元信息，供消费方/看门狗自行探活）")
 	}
+	mcpPath, err := normalizeMCPPath(body.MCPPath)
+	if err != nil {
+		return err
+	}
+	body.MCPPath = mcpPath
 	return nil
+}
+
+// normalizeMCPPath 把契约上的 MCP 地址收成一条以 / 开头的路径。
+// 没写时用 /mcp，这样每个服务都有一个可发现的 MCP 地址。
+func normalizeMCPPath(v string) (string, error) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return model.DefaultMCPPath, nil
+	}
+	if !strings.HasPrefix(v, "/") || strings.ContainsAny(v, " \t?#") || strings.Contains(v, "://") {
+		return "", errString("mcpPath 必须是以 / 开头的路径（服务的 MCP 地址，默认 /mcp）")
+	}
+	if utf8Len(v) > 256 {
+		return "", errString("mcpPath 过长（上限 256 字符）")
+	}
+	return v, nil
 }
