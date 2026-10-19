@@ -9,6 +9,10 @@ info:
     **语义边界：本中心只记录"登记了什么"——不探活、不心跳、不启停任何进程，
     也不保证实例可达。** 可达性由消费方自行校验（契约里的 `healthPath` 只是元信息）。
 
+    **MCP 聚合**：`GET /v1/mcp/servers` 把每个服务的 `mcpPath` 接到实例地址上，只读登记数据。
+    `POST /mcp` 是给 agent 的 Streamable HTTP 入口：工具名是 `namespace__service__tool`，
+    调用时才转发到该服务自己的 MCP。某个后端连不上只影响那一次调用。
+
     鉴权：
       - 读接口默认开放（`REGISTRY_READ_AUTH=open`），便于各平台拉取元信息。
       - **写接口默认开放**（`REGISTRY_WRITE_AUTH=open`）：不带令牌也能登记/维护，actor 记为
@@ -195,6 +199,43 @@ paths:
                   total: { type: integer }
                   limit: { type: integer }
                   offset: { type: integer }
+
+  /v1/mcp/servers:
+    get:
+      tags: [discover]
+      summary: MCP 目录（每个服务的 MCP 地址）
+      description: |
+        用契约上的 `mcpPath`（默认 `/mcp`）接到该服务每个 HTTP(S) 实例的
+        `scheme://host:port` 后面。没有实例的服务仍出现，`endpoints` 为空。
+        tcp/tls 实例不产生 MCP 地址。本接口不访问这些地址。
+      parameters:
+        - { in: query, name: namespace, schema: { type: string } }
+      responses:
+        '200':
+          description: MCP 目录，以及本中心自己的聚合入口
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  servers: { type: array, items: { $ref: '#/components/schemas/MCPServer' } }
+                  mcpPath: { type: string, example: /mcp }
+                  mcpTransport: { type: string, example: streamable-http }
+
+  /mcp:
+    post:
+      tags: [discover]
+      summary: MCP 聚合入口（Streamable HTTP）
+      description: |
+        Agent 只连这一个地址。`tools/list` 里固定有 `registry_mcp_servers`（目录，不访问后端）。
+        其余工具来自各服务自己的 MCP，名字是 `namespace__service__tool`，`tools/call` 原样转发。
+        请求头 `identity_role` / `identity_id` 会跟着转发。
+        Accept 必须同时包含 `application/json` 和 `text/event-stream`。
+      responses:
+        '200':
+          description: MCP JSON-RPC 响应
+        '401':
+          description: 读接口要求令牌时未携带
 
   /v1/departments:
     get:
@@ -793,6 +834,25 @@ components:
         updatedAt: { type: string, format: date-time }
         registeredBy: { type: string, description: 谁登记/改的（审计） }
         instanceCount: { type: integer }
+
+    MCPServer:
+      type: object
+      description: 一个已登记服务的 MCP 地址（目录，不代表该地址当前可达）
+      properties:
+        namespace: { type: string }
+        service: { type: string }
+        description: { type: string }
+        mcpPath: { type: string, example: /mcp }
+        endpoints:
+          type: array
+          items:
+            type: object
+            properties:
+              instanceId: { type: string }
+              url: { type: string, example: http://10.0.0.2:4220/mcp }
+              scheme: { type: string, enum: [http, https] }
+              host: { type: string }
+              port: { type: integer }
 
     ServiceWrite:
       type: object
