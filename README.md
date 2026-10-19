@@ -336,6 +336,8 @@ toast / 部门目录 / 表单反馈），各自只放自己的逻辑：
 | POST | `/v1/namespaces/{ns}/services/{svc}/instances` | 登记单个实例 | 写 |
 | PATCH/DELETE | `/v1/namespaces/{ns}/services/{svc}/instances/{id}` | 改/注销实例 | 写 |
 | GET | `/v1/services` | 服务目录（`tag`/`owner`/`protocol`/`department`/`q`/分页，`q` 也匹配 `gitRepoUrl` 与部门） | 读 |
+| GET | `/v1/mcp/servers` | MCP 目录：`mcpPath` 接到实例地址上（不访问这些地址） | 读 |
+| POST | `/mcp` | MCP 聚合入口：工具名 `namespace__service__tool`，调用时转发到该服务自己的 MCP | 读 |
 | GET | `/v1/departments` | **部门目录**（数据来自组织架构服务，带 TTL 缓存与数据成色） | 读 |
 | GET | `/v1/orgs/{orgId}/services` | **按组织（部门）查服务列表**（`org_id` = 契约上的 `departmentId`；带组织信息与目录成色，只认 ID） | 读 |
 | GET | `/v1/instances/{id}` | 按实例 ID 全局查询 | 读 |

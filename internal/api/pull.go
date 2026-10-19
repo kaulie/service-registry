@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kaulie/service-registry/internal/mcpagg"
 	"github.com/kaulie/service-registry/internal/orgdir"
 	"github.com/kaulie/service-registry/internal/store"
 )
@@ -150,6 +151,11 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 		},
 		"semantics": "本中心是**元信息存储中心**：只记录登记了什么，" +
 			"不探活、不心跳、不保证实例可达；可达性由消费方自行校验。",
+		"mcp": map[string]any{
+			"path":      mcpagg.AggregatorPath,
+			"transport": "streamable-http",
+			"catalog":   mcpagg.CatalogPath,
+		},
 	})
 }
 

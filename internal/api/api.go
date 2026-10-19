@@ -79,6 +79,9 @@ func (s *Server) Handler() http.Handler {
 
 	// ---- 发现/查询 ----
 	add(http.MethodGet, "/v1/services", s.handleListServices)
+	// MCP 目录只拼地址；/mcp 是给 agent 的聚合入口，调用时才转发到各服务自己的 MCP。
+	add(http.MethodGet, "/v1/mcp/servers", s.handleMCPServers)
+	add(http.MethodPost, "/mcp", s.handleMCP)
 	add(http.MethodGet, "/v1/instances/{id}", s.handleGetInstanceByID)
 	add(http.MethodGet, "/v1/search/apis", s.handleSearchAPIs)
 	// 部门目录（数据来自组织接口，本中心只取回来转给面板/消费方）
