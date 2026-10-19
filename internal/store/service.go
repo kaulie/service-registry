@@ -40,12 +40,12 @@ func (s *Store) UpsertService(ctx context.Context, in ServiceInput, actor string
 			if _, err := tx.ExecContext(ctx, `
 				INSERT INTO services (namespace, name, type, app_id, os, version, owner, description, git_repo_url,
 				                      department_id, department_name, tags, protocols,
-				                      base_path, health_path, auth_schemes, docs_url, spec_url,
+				                      base_path, health_path, mcp_path, auth_schemes, docs_url, spec_url,
 				                      spec, spec_format, spec_hash, revision, created_at, updated_at, registered_by)
-				VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)`,
+				VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)`,
 				svc.Namespace, svc.Name, svc.Type, svc.AppID, svc.OS, svc.Version, svc.Owner, svc.Description, svc.GitRepoURL,
 				svc.DepartmentID, svc.DepartmentName,
-				encodeStrings(svc.Tags), encodeStrings(svc.API.Protocols), svc.BasePath, svc.HealthPath,
+				encodeStrings(svc.Tags), encodeStrings(svc.API.Protocols), svc.BasePath, svc.HealthPath, svc.MCPPath,
 				encodeAuthSchemes(svc.API.Auth), svc.API.DocsURL, svc.API.SpecURL,
 				string(in.SpecRaw), in.SpecFormat, in.SpecHash,
 				formatTime(now), formatTime(now), actor); err != nil {
@@ -55,13 +55,13 @@ func (s *Store) UpsertService(ctx context.Context, in ServiceInput, actor string
 			if _, err := tx.ExecContext(ctx, `
 				UPDATE services SET type = ?, app_id = ?, os = ?, version = ?, owner = ?, description = ?, git_repo_url = ?,
 				       department_id = ?, department_name = ?, tags = ?, protocols = ?,
-				       base_path = ?, health_path = ?, auth_schemes = ?, docs_url = ?, spec_url = ?,
+				       base_path = ?, health_path = ?, mcp_path = ?, auth_schemes = ?, docs_url = ?, spec_url = ?,
 				       spec = ?, spec_format = ?, spec_hash = ?, updated_at = ?, registered_by = ?
 				 WHERE namespace = ? AND name = ?`,
 				svc.Type, svc.AppID, svc.OS, svc.Version, svc.Owner, svc.Description, svc.GitRepoURL,
 				svc.DepartmentID, svc.DepartmentName,
 				encodeStrings(svc.Tags), encodeStrings(svc.API.Protocols),
-				svc.BasePath, svc.HealthPath, encodeAuthSchemes(svc.API.Auth), svc.API.DocsURL, svc.API.SpecURL,
+				svc.BasePath, svc.HealthPath, svc.MCPPath, encodeAuthSchemes(svc.API.Auth), svc.API.DocsURL, svc.API.SpecURL,
 				string(in.SpecRaw), in.SpecFormat, in.SpecHash, formatTime(now), actor,
 				svc.Namespace, svc.Name); err != nil {
 				return err

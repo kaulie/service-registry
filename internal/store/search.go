@@ -87,6 +87,7 @@ type EndpointMatch struct {
 	ServiceVersion string `json:"serviceVersion,omitempty"`
 	Description    string `json:"description,omitempty"`
 	GitRepoURL     string `json:"gitRepoUrl,omitempty"`
+	MCPPath        string `json:"mcpPath,omitempty"`
 	// 部门跟着命中一起返回（数据来自组织接口登记的部门属性）：找接口时顺手就知道归属哪个部门。
 	DepartmentID   string         `json:"departmentId,omitempty"`
 	DepartmentName string         `json:"departmentName,omitempty"`
@@ -125,6 +126,7 @@ func (s *Store) SearchEndpoints(ctx context.Context, f EndpointFilter) ([]Endpoi
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT e.namespace, e.service, e.method, e.path, e.summary, e.operation_id, e.tags, e.auth,
 		       COALESCE(sv.version, ''), COALESCE(sv.description, ''), COALESCE(sv.git_repo_url, ''),
+		       COALESCE(sv.mcp_path, '/mcp'),
 		       COALESCE(sv.department_id, ''), COALESCE(sv.department_name, ''),
 		       (SELECT COUNT(1) FROM instances i WHERE i.namespace = e.namespace AND i.service = e.service)
 		FROM endpoints e LEFT JOIN services sv ON sv.namespace = e.namespace AND sv.name = e.service
@@ -145,7 +147,7 @@ func (s *Store) SearchEndpoints(ctx context.Context, f EndpointFilter) ([]Endpoi
 		)
 		if err := rows.Scan(&m.Namespace, &m.Service, &m.Endpoint.Method, &m.Endpoint.Path,
 			&m.Endpoint.Summary, &m.Endpoint.OperationID, &tags, &authStr,
-			&m.ServiceVersion, &m.Description, &m.GitRepoURL,
+			&m.ServiceVersion, &m.Description, &m.GitRepoURL, &m.MCPPath,
 			&m.DepartmentID, &m.DepartmentName, &m.InstanceCount); err != nil {
 			return nil, false, err
 		}

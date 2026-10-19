@@ -108,6 +108,9 @@ type ServiceAPI struct {
 	Endpoints []Endpoint   `json:"endpoints"`
 }
 
+// DefaultMCPPath 是服务契约没写 MCP 地址时使用的路径。
+const DefaultMCPPath = "/mcp"
+
 // Service 是服务契约（低频变更，发版时更新）。
 type Service struct {
 	Namespace string `json:"namespace"`
@@ -128,16 +131,19 @@ type Service struct {
 	//   - DepartmentName 是展示名（如 SRE部门），冗余存一份，消费方不用再查组织接口。
 	// 数据来源是组织接口 `GET /api/v1/departments`（见 internal/orgdir）：
 	// 登记时按需对齐（TTL 缓存），组织接口不可达则按声明值保存（不阻塞登记）。
-	DepartmentID   string     `json:"departmentId,omitempty"`
-	DepartmentName string     `json:"departmentName,omitempty"`
-	Tags           []string   `json:"tags,omitempty"`
-	BasePath       string     `json:"basePath,omitempty"`
-	HealthPath     string     `json:"healthPath,omitempty"` // 元信息：消费方/看门狗可据此自行探活
-	API            ServiceAPI `json:"api"`
-	Revision       int64      `json:"revision,omitempty"`
-	CreatedAt      time.Time  `json:"createdAt"`
-	UpdatedAt      time.Time  `json:"updatedAt"`
-	RegisteredBy   string     `json:"registeredBy,omitempty"`
+	DepartmentID   string   `json:"departmentId,omitempty"`
+	DepartmentName string   `json:"departmentName,omitempty"`
+	Tags           []string `json:"tags,omitempty"`
+	BasePath       string   `json:"basePath,omitempty"`
+	HealthPath     string   `json:"healthPath,omitempty"` // 元信息：消费方/看门狗可据此自行探活
+	// MCPPath 是这个服务的 MCP 地址（相对实例根路径）。空值在登记时收成 DefaultMCPPath。
+	// 消费方把它接在实例的 scheme://host:port 后面，得到该服务的 Streamable HTTP MCP。
+	MCPPath      string     `json:"mcpPath,omitempty"`
+	API          ServiceAPI `json:"api"`
+	Revision     int64      `json:"revision,omitempty"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	UpdatedAt    time.Time  `json:"updatedAt"`
+	RegisteredBy string     `json:"registeredBy,omitempty"`
 
 	// InstanceCount 仅在列表/详情查询时填充（不落库）。
 	InstanceCount int `json:"instanceCount"`

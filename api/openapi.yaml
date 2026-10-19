@@ -783,6 +783,10 @@ components:
         tags: { type: array, items: { type: string } }
         basePath: { type: string }
         healthPath: { type: string, description: 元信息：消费方/看门狗可据此自行探活 }
+        mcpPath:
+          type: string
+          default: /mcp
+          description: 该服务的 MCP 地址（相对实例根路径，接到 scheme://host:port 后面）。没写时为 /mcp
         api: { $ref: '#/components/schemas/ServiceAPI' }
         revision: { type: integer, format: int64, description: 最后一次被改时的全局 revision }
         createdAt: { type: string, format: date-time }
@@ -829,6 +833,11 @@ components:
         tags: { type: array, items: { type: string } }
         basePath: { type: string }
         healthPath: { type: string, description: 必须以 / 开头 }
+        mcpPath:
+          type: string
+          default: /mcp
+          description: 该服务的 MCP 地址，必须以 / 开头的路径。留空时收成 /mcp
+          example: /mcp
         api:
           allOf:
             - $ref: '#/components/schemas/ServiceAPI'
@@ -897,6 +906,7 @@ components:
         serviceVersion: { type: string }
         description: { type: string }
         gitRepoUrl: { type: string, description: 该服务的代码仓库地址（跟着命中一起返回，找源码不用再查一次） }
+        mcpPath: { type: string, description: 该服务的 MCP 地址（相对实例根路径，默认 /mcp） }
         departmentId: { type: string, description: 该服务归属部门的 ID（数据来自组织接口） }
         departmentName: { type: string, description: 该服务归属部门名 }
         instanceCount: { type: integer }

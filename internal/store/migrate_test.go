@@ -25,6 +25,7 @@ func TestOpenMigratesLegacyServicesTable(t *testing.T) {
 	legacy = strings.Replace(legacy, "  app_id        TEXT NOT NULL DEFAULT '',\n", "", 1)
 	legacy = strings.ReplaceAll(legacy, "  os            TEXT NOT NULL DEFAULT '',\n", "")
 	legacy = strings.Replace(legacy, "  arch          TEXT NOT NULL DEFAULT '',\n", "", 1)
+	legacy = strings.Replace(legacy, "  mcp_path      TEXT NOT NULL DEFAULT '/mcp',\n", "", 1)
 	if legacy == schema {
 		t.Fatal("schema 里已经没有 git_repo_url/type/app_id/os/arch 这些行了，本测试的前提失效（请更新测试）")
 	}
@@ -59,7 +60,7 @@ func TestOpenMigratesLegacyServicesTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("读取表结构失败：%v", err)
 	}
-	for _, col := range []string{"git_repo_url", "type", "app_id", "os"} {
+	for _, col := range []string{"git_repo_url", "type", "app_id", "os", "mcp_path"} {
 		if !cols[col] {
 			t.Fatalf("迁移没有给老库的 services 补上 %s 列", col)
 		}
@@ -80,7 +81,7 @@ func TestOpenMigratesLegacyServicesTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("读取老数据失败：%v", err)
 	}
-	if svc.GitRepoURL != "" || svc.Type != "service" || svc.AppID != "" || svc.OS != "" {
+	if svc.GitRepoURL != "" || svc.Type != "service" || svc.AppID != "" || svc.OS != "" || svc.MCPPath != "/mcp" {
 		t.Fatalf("老数据的新列默认值不对：%+v", svc)
 	}
 	legacyInst, err := st.GetInstance(ctx, "inst_legacy")

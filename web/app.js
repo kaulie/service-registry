@@ -269,6 +269,7 @@ function serviceCard(svc) {
       ${tags}${protocols}${appMeta}${svc.owner ? `<span class="tag">owner:${esc(svc.owner)}</span>` : ''}
       ${deptTag(svc)}
       ${svc.healthPath ? `<span class="tag">health:${esc(svc.healthPath)}</span>` : ''}
+      ${svc.mcpPath ? `<span class="tag">mcp:${esc(svc.mcpPath)}</span>` : ''}
       ${svc.gitRepoUrl ? repoTag(svc.gitRepoUrl) : ''}
       ${svc.registeredBy ? `<span class="tag">来源:${esc(svc.registeredBy)}</span>` : ''}
     </div>`;
@@ -566,6 +567,7 @@ function treeSvcNode(svc) {
     svc.owner ? `<span class="tag">owner:${esc(svc.owner)}</span>` : '',
     svc.gitRepoUrl ? repoTag(svc.gitRepoUrl) : '',
     svc.healthPath ? `<span class="tag">health:${esc(svc.healthPath)}</span>` : '',
+    svc.mcpPath ? `<span class="tag">mcp:${esc(svc.mcpPath)}</span>` : '',
     `<span class="item__meta">revision ${esc(svc.revision || 0)}</span>`,
   ].join('');
   return treeNode(treeSvcKey(svc), svcKey(svc), badges,
