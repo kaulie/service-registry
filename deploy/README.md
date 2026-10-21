@@ -30,8 +30,8 @@ runtime 布局（`REGISTRY_RUNTIME_DIR`，默认 `/Users/gaolei/runtime/service-
 ```
 bin/registryd             ← 发版包（控制面板资源已编入二进制，无需额外文件）
 scripts/*.sh              ← 发版包
-backend/.env              ← 保留：管理令牌 + 可选覆盖（首次启动自动生成，0600）
-backend/data/registry.db  ← 保留：元信息库（服务契约 + 实例 + 变更/审计）
+backend/.env              ← 保留：管理令牌 + 可选覆盖（首次启动自动生成，0600）。数据库连接串不写在这里，由部署平台 runtimeEnv 的 REGISTRY_POSTGRES_DSN 注入
+backend/data/registry.db  ← 保留：SQLite 文件。配了 PostgreSQL 之后只作一次性导入来源
 backend/runtime.pid       ← 保留：进程号
 backend/server.log        ← 保留：日志
 VERSION / DEPLOYMENT / COMMIT   ← 平台写入

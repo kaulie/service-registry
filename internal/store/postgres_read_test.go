@@ -6,7 +6,7 @@ import (
 )
 
 // TestPostgresReadsImportedCatalog 连上已导入的 service_registry 库，确认读路径能取出目录。
-// 没有 REGISTRY_POSTGRES_TEST_DSN 时跳过，CI 不依赖远端库。
+// 没有 REGISTRY_POSTGRES_TEST_DSN 时跳过，CI 不依赖远端库。不断言具体条数：线上目录会继续增长。
 func TestPostgresReadsImportedCatalog(t *testing.T) {
 	dsn := os.Getenv("REGISTRY_POSTGRES_TEST_DSN")
 	if dsn == "" {
@@ -23,8 +23,8 @@ func TestPostgresReadsImportedCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("列出服务失败：%v", err)
 	}
-	if total != 14 || len(svcs) != 14 {
-		t.Fatalf("服务数应为 14，实际 total=%d len=%d", total, len(svcs))
+	if total < 1 || len(svcs) != total {
+		t.Fatalf("目录应非空且与 total 一致，实际 total=%d len=%d", total, len(svcs))
 	}
 	if _, _, err := st.ListServices(ctx, ServiceFilter{Tag: "events"}); err != nil {
 		t.Fatalf("按标签过滤失败：%v", err)
@@ -32,13 +32,12 @@ func TestPostgresReadsImportedCatalog(t *testing.T) {
 	if _, _, err := st.ListServices(ctx, ServiceFilter{OrgID: "d0002", Query: "service"}); err != nil {
 		t.Fatalf("按部门/关键字过滤失败：%v", err)
 	}
-
 	insts, err := st.ListInstances(ctx, "default", "organization")
-	if err != nil || len(insts) != 1 || insts[0].Host != "127.0.0.1" || insts[0].OS != "mac" {
-		t.Fatalf("organization 实例不正确：%+v %v", insts, err)
+	if err != nil || len(insts) < 1 || insts[0].Host == "" {
+		t.Fatalf("organization 实例读不出来：%+v %v", insts, err)
 	}
 	rev, err := st.CurrentRevision(ctx)
-	if err != nil || rev != 145 {
-		t.Fatalf("revision 应为 145，实际 %d %v", rev, err)
+	if err != nil || rev < 1 {
+		t.Fatalf("revision 应大于 0，实际 %d %v", rev, err)
 	}
 }

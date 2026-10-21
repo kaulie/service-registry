@@ -46,6 +46,22 @@ func main() {
 	}
 	defer func() { _ = st.Close() }()
 
+	if cfg.PostgresDSN != "" {
+		importCtx, importCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		imported, ierr := st.ImportLegacySQLite(importCtx, cfg.DBPath)
+		importCancel()
+		if ierr != nil {
+			log.Error("从 SQLite 导入 PostgreSQL 失败", "sqlite", cfg.DBPath, "err", ierr)
+			os.Exit(1)
+		}
+		switch imported.Status {
+		case store.SQLiteImportImported:
+			log.Info("已把 SQLite 元信息导入 PostgreSQL", "sqlite", cfg.DBPath)
+		case store.SQLiteImportSkippedNonEmpty:
+			log.Info("PostgreSQL 已有数据，未从 SQLite 覆盖", "sqlite", cfg.DBPath)
+		}
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	if cfg.DefaultNamespace != "" {
 		created, err := st.EnsureNamespace(ctx, cfg.DefaultNamespace, "默认命名空间（启动时自动播种）")
