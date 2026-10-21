@@ -12,6 +12,9 @@ const (
 	EntityNamespace = "namespace"
 	EntityService   = "service"
 	EntityInstance  = "instance"
+	// EntityMCPServer 是 agent 要加载的 MCP 服务（stdio / http / sse）。
+	// 它和服务契约上的 mcpPath 不是一回事：mcpPath 只是「这个服务如果有 MCP，路径是什么」。
+	EntityMCPServer = "mcp_server"
 )
 
 // 变更操作类型。

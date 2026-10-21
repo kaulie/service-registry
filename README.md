@@ -307,7 +307,7 @@ toast / 部门目录 / 表单反馈），各自只放自己的逻辑：
 | 令牌 | 能做什么 |
 |---|---|
 | `REGISTRY_ADMIN_TOKEN`（admin） | 全权：任意命名空间读写、创建/删除命名空间、轮换令牌 |
-| 命名空间令牌（建命名空间时返回） | **只**能写自己那个命名空间的服务与实例 |
+| 命名空间令牌（建命名空间时返回） | **只**能写自己那个命名空间的服务、实例与 agent MCP 服务 |
 | 不带令牌 | 读接口默认可用（便于平台拉取）；**写接口默认也开放**（见下） |
 
 **写接口默认开放**（`REGISTRY_WRITE_AUTH=open`，本次按需求设定）：不带令牌即可登记/修改/删除。
@@ -321,7 +321,7 @@ toast / 部门目录 / 表单反馈），各自只放自己的逻辑：
   客户端带 admin 或命名空间令牌即可 —— 令牌早就在 `.env` 里生成了，不用重新分发；
 - 读接口可用 `REGISTRY_READ_AUTH=token` 单独收紧；`/health` `/healthz` `/readyz` `/metrics` 始终开放。
 - 令牌只存 sha256 哈希，明文仅在创建/轮换时返回一次；服务绑定 `127.0.0.1`，不对外网暴露。
-- `DELETE /v1/namespaces/{ns}?confirm={ns}` 才允许删除命名空间（连带其服务与实例）。
+- `DELETE /v1/namespaces/{ns}?confirm={ns}` 才允许删除命名空间（连带其服务、实例与 agent MCP 服务）。
 
 ## API 一览
 
@@ -337,6 +337,9 @@ toast / 部门目录 / 表单反馈），各自只放自己的逻辑：
 | PATCH/DELETE | `/v1/namespaces/{ns}/services/{svc}/instances/{id}` | 改/注销实例 | 写 |
 | GET | `/v1/services` | 服务目录（`tag`/`owner`/`protocol`/`department`/`q`/分页，`q` 也匹配 `gitRepoUrl` 与部门） | 读 |
 | GET | `/v1/mcp/servers` | MCP 目录：`mcpPath` 接到实例地址上（不访问这些地址） | 读 |
+| GET | `/v1/agent/mcp-servers` | **agent 要加载的 MCP 列表**（`mcpServers` 配置：stdio / http / sse；`?namespace=` 可过滤） | 读 |
+| PUT | `/v1/namespaces/{ns}/agent/mcp-servers/{name}` | 登记/更新一个 agent MCP 服务（名字全局唯一；内容不变不推进 revision） | 写 |
+| DELETE | `/v1/namespaces/{ns}/agent/mcp-servers/{name}` | 删除一个 agent MCP 服务 | 写 |
 | POST | `/mcp` | MCP 聚合入口：工具名 `namespace__service__tool`，调用时转发到该服务自己的 MCP | 读 |
 | GET | `/v1/departments` | **部门目录**（数据来自组织架构服务，带 TTL 缓存与数据成色） | 读 |
 | GET | `/v1/orgs/{orgId}/services` | **按组织（部门）查服务列表**（`org_id` = 契约上的 `departmentId`；带组织信息与目录成色，只认 ID） | 读 |

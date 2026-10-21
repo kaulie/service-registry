@@ -84,6 +84,23 @@ CREATE TABLE IF NOT EXISTS changes (
 );
 CREATE INDEX IF NOT EXISTS idx_changes_namespace ON changes(namespace, revision);
 CREATE INDEX IF NOT EXISTS idx_changes_ref ON changes(ref, revision);
+
+CREATE TABLE IF NOT EXISTS agent_mcp_servers (
+  name          TEXT PRIMARY KEY,
+  namespace     TEXT NOT NULL,
+  transport     TEXT NOT NULL,
+  command       TEXT NOT NULL DEFAULT '',
+  args          TEXT NOT NULL DEFAULT '[]',
+  env           TEXT NOT NULL DEFAULT '{}',
+  cwd           TEXT NOT NULL DEFAULT '',
+  url           TEXT NOT NULL DEFAULT '',
+  headers       TEXT NOT NULL DEFAULT '{}',
+  revision      INTEGER NOT NULL DEFAULT 0,
+  created_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL,
+  registered_by TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_agent_mcp_servers_namespace ON agent_mcp_servers(namespace);
 `
 
 // postgresSchema 与 schema 同一套表，只把 SQLite 专有的 AUTOINCREMENT 换成 IDENTITY。
@@ -171,4 +188,21 @@ CREATE TABLE IF NOT EXISTS changes (
 );
 CREATE INDEX IF NOT EXISTS idx_changes_namespace ON changes(namespace, revision);
 CREATE INDEX IF NOT EXISTS idx_changes_ref ON changes(ref, revision);
+
+CREATE TABLE IF NOT EXISTS agent_mcp_servers (
+  name          TEXT PRIMARY KEY,
+  namespace     TEXT NOT NULL,
+  transport     TEXT NOT NULL,
+  command       TEXT NOT NULL DEFAULT '',
+  args          TEXT NOT NULL DEFAULT '[]',
+  env           TEXT NOT NULL DEFAULT '{}',
+  cwd           TEXT NOT NULL DEFAULT '',
+  url           TEXT NOT NULL DEFAULT '',
+  headers       TEXT NOT NULL DEFAULT '{}',
+  revision      INTEGER NOT NULL DEFAULT 0,
+  created_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL,
+  registered_by TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_agent_mcp_servers_namespace ON agent_mcp_servers(namespace);
 `
