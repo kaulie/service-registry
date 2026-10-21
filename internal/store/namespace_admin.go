@@ -55,13 +55,14 @@ func (s *Store) SetNamespaceToken(ctx context.Context, name, tokenHash, actor, d
 	})
 }
 
-// DeleteNamespace 删除命名空间及其全部服务与实例（显式级联）。
+// DeleteNamespace 删除命名空间及其全部服务、实例与 agent MCP 服务（显式级联）。
 func (s *Store) DeleteNamespace(ctx context.Context, name, actor string) error {
 	if _, _, err := s.GetNamespace(ctx, name); err != nil {
 		return err
 	}
 	return s.write(ctx, func(tx *sqlTx) error {
 		for _, q := range []string{
+			`DELETE FROM agent_mcp_servers WHERE namespace = ?`,
 			`DELETE FROM instances WHERE namespace = ?`,
 			`DELETE FROM endpoints WHERE namespace = ?`,
 			`DELETE FROM services WHERE namespace = ?`,
@@ -73,7 +74,7 @@ func (s *Store) DeleteNamespace(ctx context.Context, name, actor string) error {
 		}
 		_, err := recordChange(ctx, tx, change{
 			Namespace: name, Entity: model.EntityNamespace, Ref: name,
-			Op: model.OpDelete, Actor: actor, Detail: "删除命名空间（含其全部服务与实例）",
+			Op: model.OpDelete, Actor: actor, Detail: "删除命名空间（含其全部服务、实例与 agent MCP 服务）",
 		})
 		return err
 	})

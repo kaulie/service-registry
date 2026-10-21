@@ -13,6 +13,10 @@ info:
     `POST /mcp` 是给 agent 的 Streamable HTTP 入口：工具名是 `namespace__service__tool`，
     调用时才转发到该服务自己的 MCP。某个后端连不上只影响那一次调用。
 
+    **Agent 要加载的 MCP 列表**：`GET /v1/agent/mcp-servers` 返回 `{"mcpServers": {名字: 配置}}`，
+    配置是 stdio（command/args/env/cwd）、http 或 sse。这是单独登记的元信息，
+    不是从服务实例推出来的。本中心不启动这些进程，也不请求这些地址。
+
     鉴权：
       - 读接口默认开放（`REGISTRY_READ_AUTH=open`），便于各平台拉取元信息。
       - **写接口默认开放**（`REGISTRY_WRITE_AUTH=open`）：不带令牌也能登记/维护，actor 记为
@@ -156,7 +160,7 @@ paths:
         - { in: query, name: since, schema: { type: integer, format: int64 } }
         - { in: query, name: limit, schema: { type: integer, default: 100 } }
         - { in: query, name: namespace, schema: { type: string } }
-        - { in: query, name: entity, schema: { type: string, enum: [namespace, service, instance] } }
+        - { in: query, name: entity, schema: { type: string, enum: [namespace, service, instance, mcp_server] } }
         - { in: query, name: ref, schema: { type: string, example: 'default/event-center' } }
         - { in: query, name: op, schema: { type: string, enum: [create, update, delete] } }
       responses:
@@ -221,6 +225,56 @@ paths:
                   servers: { type: array, items: { $ref: '#/components/schemas/MCPServer' } }
                   mcpPath: { type: string, example: /mcp }
                   mcpTransport: { type: string, example: streamable-http }
+
+  /v1/agent/mcp-servers:
+    get:
+      tags: [discover]
+      summary: Agent 要加载的 MCP 列表（mcpServers 配置）
+      description: |
+        返回 agent（Cursor 等）可以直接加载的 MCP 配置：
+
+        ```json
+        { "mcpServers": { "名字": { ...配置 } } }
+        ```
+
+        每一项是下面三种之一：
+
+        - 本地进程：`command` / `args` / `env` / `cwd`（不写 `type`，或登记时写 `stdio`）
+        - HTTP：`type: http`、`url`、可选 `headers`
+        - SSE：`type: sse`、`url`、可选 `headers`
+
+        名单来自 `PUT /v1/namespaces/{ns}/agent/mcp-servers/{name}` 的登记，
+        **不是**把服务实例的 `mcpPath` 拼出来（那是 `GET /v1/mcp/servers`）。
+        没有实例、服务没声明 MCP，都不影响这份列表。
+
+        本接口只读登记数据：不启动 `command`，不请求 `url`。
+        `headers` 与 `env` 会原样返回，因为 agent 连接时要用；读接口默认开放，
+        不要把不该出现在本机注册中心上的凭据登记进来。
+        名字全局唯一（agent 用它当键）。`namespace` 只筛出该命名空间登记的那些。
+      parameters:
+        - { in: query, name: namespace, schema: { type: string }, description: 只返回这个命名空间登记的 MCP 服务；省略则全部 }
+      responses:
+        '200':
+          description: agent 可直接加载的 MCP 配置
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgentMCPServerList' }
+              example:
+                mcpServers:
+                  git-via-proxy:
+                    command: node
+                    args: ["/absolute/path/to/server.mjs"]
+                    env:
+                      GIT_VIA_PROXY_URL: "http://127.0.0.1:7897"
+                    cwd: /absolute/path/to/server-dir
+                  docs:
+                    type: http
+                    url: https://example.com/mcp
+                    headers:
+                      Authorization: "Bearer token"
+                  events:
+                    type: sse
+                    url: https://example.com/sse
 
   /mcp:
     post:
@@ -459,6 +513,43 @@ paths:
       responses:
         '200': { description: 已清除 }
 
+  /v1/namespaces/{ns}/agent/mcp-servers/{name}:
+    parameters:
+      - $ref: '#/components/parameters/ns'
+      - { in: path, name: name, required: true, schema: { type: string }, description: MCP 服务名（agent 列表里的键，全局唯一） }
+    put:
+      tags: [register]
+      summary: 登记或更新一个 agent MCP 服务（幂等）
+      description: |
+        请求体就是 agent 列表里那一项配置（名字在路径上，不在 body 里）。
+        本地进程给 `command`（`type` 可省略）；远程给 `type` 为 `http` 或 `sse` 再加 `url`。
+        内容与已登记的完全一致时返回 200，不推进 revision。
+        同名已被其他命名空间登记时 409。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AgentMCPServerConfig' }
+      responses:
+        '201':
+          description: 新建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgentMCPServerWriteResult' }
+        '200':
+          description: 更新（含内容未变化）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgentMCPServerWriteResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      tags: [register]
+      summary: 删除一个 agent MCP 服务
+      responses:
+        '204': { description: 已删除 }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   /v1/namespaces/{ns}/services/{svc}:
     parameters:
@@ -835,6 +926,70 @@ components:
         registeredBy: { type: string, description: 谁登记/改的（审计） }
         instanceCount: { type: integer }
 
+    AgentMCPServerList:
+      type: object
+      description: agent 可直接加载的 MCP 配置。键是服务名。
+      required: [mcpServers]
+      properties:
+        mcpServers:
+          type: object
+          additionalProperties: { $ref: '#/components/schemas/AgentMCPServerConfig' }
+
+    AgentMCPServerConfig:
+      description: |
+        一项 MCP 配置。三选一：本地进程（不写 type）、`type: http`、`type: sse`。
+      oneOf:
+        - $ref: '#/components/schemas/AgentMCPStdio'
+        - $ref: '#/components/schemas/AgentMCPHTTP'
+        - $ref: '#/components/schemas/AgentMCPSSE'
+
+    AgentMCPStdio:
+      type: object
+      description: 本地进程。agent 自己启动，本中心不执行 command。
+      required: [command]
+      properties:
+        command: { type: string, example: node }
+        args:
+          type: array
+          items: { type: string }
+          example: ["/absolute/path/to/server.mjs"]
+        env:
+          type: object
+          additionalProperties: { type: string }
+          example:
+            GIT_VIA_PROXY_URL: "http://127.0.0.1:7897"
+        cwd: { type: string, example: /absolute/path/to/server-dir }
+
+    AgentMCPHTTP:
+      type: object
+      required: [type, url]
+      properties:
+        type: { type: string, enum: [http] }
+        url: { type: string, example: https://example.com/mcp }
+        headers:
+          type: object
+          additionalProperties: { type: string }
+          description: 原样返回给 agent。读接口默认开放，不要登记不该出现在本机的凭据。
+          example:
+            Authorization: "Bearer token"
+
+    AgentMCPSSE:
+      type: object
+      required: [type, url]
+      properties:
+        type: { type: string, enum: [sse] }
+        url: { type: string, example: https://example.com/sse }
+        headers:
+          type: object
+          additionalProperties: { type: string }
+
+    AgentMCPServerWriteResult:
+      type: object
+      properties:
+        namespace: { type: string }
+        name: { type: string }
+        mcpServer: { $ref: '#/components/schemas/AgentMCPServerConfig' }
+
     MCPServer:
       type: object
       description: 一个已登记服务的 MCP 地址（目录，不代表该地址当前可达）
@@ -991,7 +1146,7 @@ components:
         revision: { type: integer, format: int64 }
         at: { type: string, format: date-time }
         namespace: { type: string }
-        entity: { type: string, enum: [namespace, service, instance] }
+        entity: { type: string, enum: [namespace, service, instance, mcp_server] }
         ref: { type: string, example: default/event-center/inst_01J8Z9K3M4N5P6Q7R8S9T0V1W2 }
         op: { type: string, enum: [create, update, delete] }
         actor: { type: string, description: 'admin / ns:<name> / anonymous' }

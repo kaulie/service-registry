@@ -81,6 +81,8 @@ func (s *Server) Handler() http.Handler {
 	add(http.MethodGet, "/v1/services", s.handleListServices)
 	// MCP 目录只拼地址；/mcp 是给 agent 的聚合入口，调用时才转发到各服务自己的 MCP。
 	add(http.MethodGet, "/v1/mcp/servers", s.handleMCPServers)
+	// agent 要加载的 MCP 列表（stdio / http / sse），原样返回 mcpServers 配置。本中心不启动、不探活。
+	add(http.MethodGet, "/v1/agent/mcp-servers", s.handleListAgentMCPServers)
 	add(http.MethodPost, "/mcp", s.handleMCP)
 	add(http.MethodGet, "/v1/instances/{id}", s.handleGetInstanceByID)
 	add(http.MethodGet, "/v1/search/apis", s.handleSearchAPIs)
@@ -97,6 +99,8 @@ func (s *Server) Handler() http.Handler {
 	add(http.MethodDelete, "/v1/namespaces/{ns}", s.handleDeleteNamespace)
 	add(http.MethodPost, "/v1/namespaces/{ns}/token", s.handleRotateToken)
 	add(http.MethodDelete, "/v1/namespaces/{ns}/token", s.handleClearToken)
+	add(http.MethodPut, "/v1/namespaces/{ns}/agent/mcp-servers/{name}", s.handlePutAgentMCPServer)
+	add(http.MethodDelete, "/v1/namespaces/{ns}/agent/mcp-servers/{name}", s.handleDeleteAgentMCPServer)
 
 	// ---- 服务契约 ----
 	add(http.MethodGet, "/v1/namespaces/{ns}/services", s.handleListServices)
