@@ -101,6 +101,11 @@ CREATE TABLE IF NOT EXISTS agent_mcp_servers (
   registered_by TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_agent_mcp_servers_namespace ON agent_mcp_servers(namespace);
+
+CREATE TABLE IF NOT EXISTS meta (
+  k TEXT PRIMARY KEY,
+  v TEXT NOT NULL
+);
 `
 
 // postgresSchema 与 schema 同一套表，只把 SQLite 专有的 AUTOINCREMENT 换成 IDENTITY。
@@ -205,4 +210,9 @@ CREATE TABLE IF NOT EXISTS agent_mcp_servers (
   registered_by TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_agent_mcp_servers_namespace ON agent_mcp_servers(namespace);
+
+CREATE TABLE IF NOT EXISTS meta (
+  k TEXT PRIMARY KEY,
+  v TEXT NOT NULL
+);
 `

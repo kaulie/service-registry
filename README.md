@@ -367,8 +367,8 @@ toast / 部门目录 / 表单反馈），各自只放自己的逻辑：
 | `PORT` | 空 | 平台/容器常用的通用端口变量；只有 `SERVICE_PORT` 读不到时才用它 |
 | `REGISTRY_HTTP_ADDR` | 空 | 完整监听地址（如 `127.0.0.1:4240`）；给了它就不再关心上面的端口变量（优先级最高） |
 | `REGISTRY_BIND` | `127.0.0.1` | 未显式给地址时用的绑定 IP（端口仍来自 `SERVICE_PORT`/`PORT`） |
-| `REGISTRY_DB_PATH` | `./data/registry.db` | SQLite 路径（`:memory:` 用于测试）。设了 `REGISTRY_POSTGRES_DSN` 时不用它 |
-| `REGISTRY_POSTGRES_DSN` | 空 | PostgreSQL 连接串。非空时本进程的读写都走这库，不再打开 SQLite |
+| `REGISTRY_DB_PATH` | `./data/registry.db` | SQLite 路径（`:memory:` 用于测试）。设了 `REGISTRY_POSTGRES_DSN` 时，读写不再用它；库还是空的时候，它是一次性导入来源 |
+| `REGISTRY_POSTGRES_DSN` | 空 | PostgreSQL 连接串。部署平台写在服务契约的 `runtimeEnv` 里（键名同此），`scripts/start.sh` 让这份注入优先于 `backend/.env`。非空时读写都走这库 |
 | `REGISTRY_ADMIN_TOKEN` | 空* | admin 令牌；合法令牌会被记入审计（`actor=admin`） |
 | `REGISTRY_WRITE_AUTH` | **`open`** | 写接口是否要令牌：`open`（默认，无需令牌） / `token`（需令牌） |
 | `REGISTRY_READ_AUTH` | `open` | 读接口是否要令牌（`open` / `token`） |
@@ -389,6 +389,10 @@ toast / 部门目录 / 表单反馈），各自只放自己的逻辑：
 改成 `REGISTRY_WRITE_AUTH=token` 重启即可收紧。
 
 非法取值会**启动即失败**（不会带着错误配置假装跑起来）。
+
+PostgreSQL 的连接串由**部署平台**配置：在服务 `service_registry` 的部署参数里加一条运行时环境变量 `REGISTRY_POSTGRES_DSN`（口令只放在这里，不进 git）。平台执行 `start.sh` / `restart.sh` 时注入它，并且压过 `backend/.env` 里的同名旧值。没配这条变量时仍用 SQLite。
+
+第一次连上一个**空的** PostgreSQL 时，如果 `REGISTRY_DB_PATH` 指向的 SQLite 文件还在（部署会保留 `backend/data/`），启动会把里面的命名空间、契约、实例、端点和变更复制过去，并记住「已经导入过」。之后再启动不再读这个文件，所以在 PostgreSQL 里删掉的服务不会从旧文件里复活。PostgreSQL 里已经有契约或变更时，不会用 SQLite 覆盖（线上库比那份文件新的时候，覆盖会把目录回退）。
 
 ### 监听端口的优先级
 
@@ -452,7 +456,7 @@ make run          # 本机起来试
 ```
 cmd/registryd/        进程入口（配置、优雅退出、指标声明）
 internal/api/         HTTP 路由、鉴权、DTO、校验、面板托管
-internal/store/       SQLite 持久化（契约/实例/变更日志/审计/快照/端点检索）
+internal/store/       SQLite / PostgreSQL 持久化（契约/实例/变更日志/审计/快照/端点检索；空库时从 SQLite 导入一次）
 internal/apispec/     内联 OpenAPI 解析（提取端点 + 基本校验 + sha256）
 internal/model/       数据模型（JSON 与存储共用）
 internal/notify/      提交后广播（long-poll / SSE 的唤醒原语）

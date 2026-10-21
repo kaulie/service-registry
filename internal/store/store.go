@@ -1,12 +1,16 @@
-// Package store 是注册中心的持久化层（SQLite + WAL）。
+// Package store 是注册中心的持久化层。
+//
+// 默认是 SQLite（WAL）。设置了 PostgreSQL 连接串时，读写都走那一个库；
+// 库还是空的、并且旁边还有 SQLite 文件时，启动会把文件里的目录导入一次。
 //
 // 设计要点：
 //   - **单写多读**：所有写操作在事务里完成，事务里顺带写一条全局递增的
 //     changes 记录（既是增量拉取游标，也是审计日志），提交后再广播唤醒
 //     所有 long-poll / SSE 读者。
-//   - **revision 单调递增**：changes.revision 由 SQLite AUTOINCREMENT 提供，
+//   - **revision 单调递增**：changes.revision 由数据库自增列提供
+//     （SQLite AUTOINCREMENT / PostgreSQL IDENTITY），
 //     每个实体也记录自己最后一次被改的 revision。
-//   - **级联删除显式做**：不依赖 FK pragma，保证在任意连接配置下行为一致。
+//   - **级联删除显式做**：不依赖外键，保证在两种库上行为一致。
 package store
 
 import (

@@ -17,9 +17,12 @@ type Config struct {
 	// PortSource 记录监听端口的来源：`SERVICE_PORT` / `PORT` / `REGISTRY_HTTP_ADDR` /
 	// `default`。只用于启动日志与排查"为什么起在这个端口"。
 	PortSource string
-	// DBPath SQLite 文件路径（":memory:" 用于测试）。PostgresDSN 非空时不使用。
+	// DBPath SQLite 文件路径（":memory:" 用于测试）。PostgresDSN 非空时不再用它做读写，
+	// 只在 PostgreSQL 还是空库时把它当作一次性导入来源。
 	DBPath string
 	// PostgresDSN 非空时，本进程的读写都走这串 PostgreSQL 连接，不再打开 SQLite。
+	// 部署平台把连接串放在服务契约的 runtimeEnv（键名就是 REGISTRY_POSTGRES_DSN）；
+	// scripts/start.sh 让这份注入优先于 backend/.env。
 	PostgresDSN string
 	// AdminToken 管理令牌；为空则管理接口不鉴权（仅开发/本机）。
 	AdminToken string

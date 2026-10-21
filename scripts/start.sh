@@ -15,7 +15,7 @@
 #   bin/registryd           可执行文件（来自发版包）
 #   scripts/*.sh            本目录（来自发版包）
 #   backend/.env            管理令牌与可选覆盖项（首次启动自动生成，权限 600）
-#   backend/data/           SQLite 元信息库（服务契约 + 实例 + 变更/审计）
+#   backend/data/           保留的 SQLite 文件。设了 PostgreSQL 之后它只作为一次性导入来源
 #   backend/runtime.pid     进程号
 #   backend/server.log      标准输出/错误
 set -euo pipefail
@@ -75,13 +75,22 @@ REGISTRY_READ_AUTH=open
 # 组织接口的单次超时与目录缓存时长
 # REGISTRY_ORG_TIMEOUT=3s
 # REGISTRY_ORG_CACHE_TTL=30s
+# PostgreSQL 连接串由部署平台的 runtimeEnv 注入（REGISTRY_POSTGRES_DSN），不要把口令写进这里。
+# 未设置时仍用上面的 SQLite 文件。
 EOF
   chmod 600 "${ENV_FILE}"
   log "已生成 ${ENV_FILE}（含新的 REGISTRY_ADMIN_TOKEN）"
 fi
 
+# 部署平台 runtimeEnv 注入的 REGISTRY_POSTGRES_DSN 优先于 backend/.env。
+# 先抄下来，source .env 之后再盖回去，避免一份旧连接串把平台配置顶掉。
+PLATFORM_POSTGRES_DSN="${REGISTRY_POSTGRES_DSN:-}"
+
 # shellcheck disable=SC1090
 set -a; . "${ENV_FILE}"; set +a
+if [ -n "${PLATFORM_POSTGRES_DSN}" ]; then
+  export REGISTRY_POSTGRES_DSN="${PLATFORM_POSTGRES_DSN}"
+fi
 
 # 监听地址按端口推导（端口来源见脚本头的优先级说明；这也是服务契约 healthUrl 里的那个端口）。
 # 注意 .env 里即便写了旧的 REGISTRY_HTTP_ADDR 也不生效：契约换端口后不能被陈旧值卡住。
@@ -109,10 +118,16 @@ fi
 export REGISTRY_ORG_URL
 
 DB_LABEL="${REGISTRY_DB_PATH}"
+DB_FROM="sqlite"
 if [ -n "${REGISTRY_POSTGRES_DSN:-}" ]; then
   DB_LABEL="postgres"
+  if [ -n "${PLATFORM_POSTGRES_DSN}" ]; then
+    DB_FROM="部署平台 runtimeEnv"
+  else
+    DB_FROM="backend/.env"
+  fi
 fi
-log "启动 部署版本=${APP_VERSION} 监听=${REGISTRY_HTTP_ADDR} 库=${DB_LABEL} 部门源=${REGISTRY_ORG_URL}"
+log "启动 部署版本=${APP_VERSION} 监听=${REGISTRY_HTTP_ADDR} 库=${DB_LABEL} 连接来源=${DB_FROM} 部门源=${REGISTRY_ORG_URL}"
 nohup "${BIN}" >> "${LOG_FILE}" 2>&1 &
 echo $! > "${PID_FILE}"
 pid="$(cat "${PID_FILE}")"

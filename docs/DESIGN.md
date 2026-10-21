@@ -192,8 +192,13 @@ entities 各自记录自己最后一次被改的 revision
 
 ### 3.1 并发与唤醒
 
-- SQLite + WAL，写事务用 `_txlock=immediate`（先拿写锁再干活，避免锁升级导致的
+- 默认 SQLite + WAL，写事务用 `_txlock=immediate`（先拿写锁再干活，避免锁升级导致的
   `SQLITE_BUSY`）；`busy_timeout=5000`。
+- 部署平台可以在服务契约的 `runtimeEnv` 里注入 `REGISTRY_POSTGRES_DSN`。注入之后读写都走
+  PostgreSQL（`changes.revision` 用 `IDENTITY`）。`scripts/start.sh` 让平台注入的值优先于
+  `backend/.env`。库还是空的、并且 `REGISTRY_DB_PATH` 上还有 SQLite 文件时，启动把那份目录
+  导入一次并记账；库里已经有数据则不动，避免用更旧的文件把目录盖掉。导入只发生一次，
+  之后在 PostgreSQL 里删除的记录不会从 SQLite 复活。
 - 写提交**之后**才对 `notify.Hub` 广播（关闭当前 channel 再换一个新的，经典唤醒原语）：
   被唤醒的读者立刻查库一定能看到刚提交的数据。
 - long-poll / SSE 都是"醒来 → 按游标查库"，而不是"从内存队列收事件"，
