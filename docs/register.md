@@ -118,6 +118,8 @@ DELETE /v1/namespaces/{ns}/services/{svc}/instances/{id}
 
 `PUT /v1/namespaces/{ns}/services/{svc}/instances` 是声明式的：请求里没出现的地址会被删掉。它留给 CI 或部署流水线对齐一整组实例。进程启动只调用 `announce`。
 
+`client/ci/register-go-service.sh` 的 `INSTANCES` 走的就是整组同步。进程已经自己上报之后，不要再用一份不含这条地址的列表去同步，否则刚报上的地址会被摘掉。
+
 ## 别人怎么找到你
 
 ```http
