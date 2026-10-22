@@ -75,6 +75,9 @@ func TestOpenMigratesLegacyServicesTable(t *testing.T) {
 	if !instCols["arch"] {
 		t.Fatal("迁移没有给老库的 instances 补上 arch 列")
 	}
+	if !instCols["last_announced_at"] {
+		t.Fatal("迁移没有给老库的 instances 补上 last_announced_at 列")
+	}
 
 	// 老数据还在，新列取默认值（type=service，其余为空）。
 	svc, err := st.GetService(ctx, "legacy", "svc")
@@ -88,8 +91,8 @@ func TestOpenMigratesLegacyServicesTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("读取老实例失败：%v", err)
 	}
-	if legacyInst.OS != "" || legacyInst.Arch != "" || legacyInst.Host != "127.0.0.1" {
-		t.Fatalf("老实例的 os/arch 默认值不对：%+v", legacyInst)
+	if legacyInst.OS != "" || legacyInst.Arch != "" || legacyInst.Host != "127.0.0.1" || !legacyInst.LastAnnouncedAt.IsZero() {
+		t.Fatalf("老实例的 os/arch/最后上报时间默认值不对：%+v", legacyInst)
 	}
 
 	// 迁移后写入/读回都要正常（含 app 类型字段）。

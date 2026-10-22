@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"testing"
+	"time"
 )
 
 func TestAnnounceInstance(t *testing.T) {
@@ -24,6 +25,11 @@ func TestAnnounceInstance(t *testing.T) {
 		t.Fatalf("上报结果不对（host 应取对端 127.0.0.1）：%v", inst)
 	}
 	id, _ := inst["id"].(string)
+	firstAnnounced, _ := inst["lastAnnouncedAt"].(string)
+	if firstAnnounced == "" {
+		t.Fatalf("首次上报应带 lastAnnouncedAt：%v", inst)
+	}
+	time.Sleep(20 * time.Millisecond)
 
 	status, again := e.do(t, http.MethodPut, "/v1/namespaces/team-a/services/event-center/announce", map[string]any{
 		"port": 9099,
@@ -32,8 +38,16 @@ func TestAnnounceInstance(t *testing.T) {
 	if status != http.StatusOK || again["created"] != false {
 		t.Fatalf("同一地址再报应为 200 且 created=false，实际 %d：%v", status, again)
 	}
-	if again["instance"].(map[string]any)["id"] != id {
+	againInst := again["instance"].(map[string]any)
+	if againInst["id"] != id {
 		t.Fatalf("再报应仍是同一条实例：%v", again)
+	}
+	if againInst["updatedAt"] != inst["updatedAt"] {
+		t.Fatalf("内容没变时 updatedAt 应保持不动：%v → %v", inst["updatedAt"], againInst["updatedAt"])
+	}
+	secondAnnounced, _ := againInst["lastAnnouncedAt"].(string)
+	if secondAnnounced == "" || secondAnnounced == firstAnnounced {
+		t.Fatalf("再报应刷新 lastAnnouncedAt：%q → %q", firstAnnounced, secondAnnounced)
 	}
 	audit := e.ok(t, http.MethodGet, "/v1/audit?namespace=team-a&entity=instance", nil)
 	if n := len(audit["entries"].([]any)); n != 1 {

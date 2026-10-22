@@ -38,7 +38,10 @@ type Instance struct {
 	Revision     int64             `json:"revision,omitempty"`
 	RegisteredAt time.Time         `json:"registeredAt"`
 	UpdatedAt    time.Time         `json:"updatedAt"`
-	RegisteredBy string            `json:"registeredBy,omitempty"`
+	// LastAnnouncedAt 是最近一次经 PUT .../announce 上报的时间。
+	// 没走过上报接口的实例为零值，响应里不出现。内容没变时它仍会刷新，updatedAt 不会。
+	LastAnnouncedAt time.Time `json:"lastAnnouncedAt,omitempty"`
+	RegisteredBy    string    `json:"registeredBy,omitempty"`
 }
 
 // Addr 返回 "scheme://host:port"（便于调用方直接使用）。

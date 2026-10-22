@@ -1137,7 +1137,13 @@ components:
         metadata: { type: object, additionalProperties: { type: string } }
         revision: { type: integer, format: int64 }
         registeredAt: { type: string, format: date-time }
-        updatedAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time, description: 这条实例的内容上次发生变化的时间 }
+        lastAnnouncedAt:
+          type: string
+          format: date-time
+          description: |
+            最近一次经 PUT .../announce 上报的时间。每次上报都刷新，内容没变也刷新。
+            没走过上报接口的实例没有这个字段。它不是心跳，也没有 TTL。
         registeredBy: { type: string }
 
     InstanceWrite:

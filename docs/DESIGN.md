@@ -98,7 +98,8 @@ Namespace（隔离域）
   这也正是"不需要心跳"之后，实例集合该怎么维护的答案。
 - `PUT .../announce` 是**服务自己上报这一条地址**：路径是服务名，请求体是端口（host 可省略，
   用连接对端）。同一 `(scheme,host,port)` 再报一次只刷新，不摘掉别的实例，内容没变不推进
-  revision。它不是心跳，也没有 TTL。整组对齐仍然走 `PUT .../instances`。
+  revision。每次上报都写 `lastAnnouncedAt`（内容没变也写）；`updatedAt` 仍只在内容变化时前进。
+  它不是心跳，也没有 TTL。整组对齐仍然走 `PUT .../instances`。
 - 匹配顺序：先按 `id`，再按 `(scheme,host,port)`。所以"换了地址但没带 id"会被记成
   "删旧 + 建新"（诚实且安全）；想表达"同一个实例换地址"，带上原 `id` 即可。
 
