@@ -161,16 +161,16 @@ func listInstancesTx(ctx context.Context, tx *sqlTx, namespace, service string) 
 
 func scanInstance(r rowScanner) (model.Instance, error) {
 	var (
-		inst                 model.Instance
-		metadata             string
-		createdAt, updatedAt string
+		inst                              model.Instance
+		metadata                          string
+		createdAt, updatedAt, announcedAt string
 	)
 	if err := r.Scan(&inst.ID, &inst.Namespace, &inst.Service, &inst.Scheme, &inst.Host, &inst.Port, &inst.OS, &inst.Arch,
-		&metadata, &inst.Revision, &createdAt, &updatedAt, &inst.RegisteredBy); err != nil {
+		&metadata, &inst.Revision, &createdAt, &updatedAt, &announcedAt, &inst.RegisteredBy); err != nil {
 		return model.Instance{}, err
 	}
 	inst.Metadata = decodeMap(metadata)
-	inst.RegisteredAt, inst.UpdatedAt = parseTime(createdAt), parseTime(updatedAt)
+	inst.RegisteredAt, inst.UpdatedAt, inst.LastAnnouncedAt = parseTime(createdAt), parseTime(updatedAt), parseTime(announcedAt)
 	return inst, nil
 }
 

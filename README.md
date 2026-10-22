@@ -334,7 +334,7 @@ toast / 部门目录 / 表单反馈），各自只放自己的逻辑：
 | GET | `/v1/namespaces/{ns}/services/{svc}/instances` | 实例列表（`?pick=random`、`?meta=k=v`） | 读 |
 | PUT | `/v1/namespaces/{ns}/services/{svc}/instances` | **声明式整组同步实例**（CI 首选） | 写 |
 | POST | `/v1/namespaces/{ns}/services/{svc}/instances` | 登记单个实例 | 写 |
-| PUT | `/v1/namespaces/{ns}/services/{svc}/announce` | **服务上报自己的监听地址**（port + os；host 可省略；同一地址再报不推进 revision） | 写 |
+| PUT | `/v1/namespaces/{ns}/services/{svc}/announce` | **服务上报自己的监听地址**（port + os；host 可省略；每次刷新 `lastAnnouncedAt`，内容没变不推进 revision） | 写 |
 | PATCH/DELETE | `/v1/namespaces/{ns}/services/{svc}/instances/{id}` | 改/注销实例 | 写 |
 | GET | `/v1/services` | 服务目录（`tag`/`owner`/`protocol`/`department`/`q`/分页，`q` 也匹配 `gitRepoUrl` 与部门） | 读 |
 | GET | `/v1/mcp/servers` | MCP 目录：`mcpPath` 接到实例地址上（不访问这些地址） | 读 |

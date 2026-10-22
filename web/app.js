@@ -756,6 +756,7 @@ async function renderInstances() {
       <td class="mono">${esc(i.arch || '')}</td>
       <td class="mono">${esc(JSON.stringify(i.metadata || {}))}</td>
       <td>${esc(fmtTime(i.updatedAt))}</td>
+      <td>${esc(fmtTime(i.lastAnnouncedAt))}</td>
       <td class="mono">${esc(i.registeredBy || '')}</td>
       <td>
         <button class="btn btn--small" data-act="edit" data-id="${esc(i.id)}">编辑</button>
@@ -764,7 +765,7 @@ async function renderInstances() {
     </tr>`).join('');
   const wrap = el('div', 'item');
   wrap.innerHTML = `<table>
-    <thead><tr><th>ID</th><th>地址</th><th>机器 OS</th><th>架构</th><th>metadata</th><th>更新时间</th><th>来源</th><th></th></tr></thead>
+    <thead><tr><th>ID</th><th>地址</th><th>机器 OS</th><th>架构</th><th>metadata</th><th>更新时间</th><th>最后上报</th><th>来源</th><th></th></tr></thead>
     <tbody>${rows}</tbody></table>`;
   const byId = new Map(instances.map((i) => [i.id, i]));
   wrap.querySelectorAll('button[data-act]').forEach((btn) => {

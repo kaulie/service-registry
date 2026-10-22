@@ -13,7 +13,7 @@ import (
 )
 
 const instanceColumns = `id, namespace, service, scheme, host, port, os, arch, metadata, revision, created_at,
-  updated_at, registered_by`
+  updated_at, last_announced_at, registered_by`
 
 // CreateInstance 新增一个实例声明（同地址已登记 → ErrConflict）。
 func (s *Store) CreateInstance(ctx context.Context, inst model.Instance, actor string) (model.Instance, error) {
@@ -88,10 +88,10 @@ func (s *Store) AnnounceInstance(ctx context.Context, in AnnounceInput, actor st
 			inst.ID = idgen.New(idgen.PrefixInstance)
 			if _, err := tx.ExecContext(ctx, `
 				INSERT INTO instances (id, namespace, service, scheme, host, port, os, arch, metadata, revision,
-				                       created_at, updated_at, registered_by)
-				VALUES (?,?,?,?,?,?,?,?,?,0,?,?,?)`,
+				                       created_at, updated_at, last_announced_at, registered_by)
+				VALUES (?,?,?,?,?,?,?,?,?,0,?,?,?,?)`,
 				inst.ID, inst.Namespace, inst.Service, inst.Scheme, inst.Host, inst.Port, inst.OS, inst.Arch,
-				encodeMap(inst.Metadata), formatTime(now), formatTime(now), actor); err != nil {
+				encodeMap(inst.Metadata), formatTime(now), formatTime(now), formatTime(now), actor); err != nil {
 				return err
 			}
 			rev, err := recordChange(ctx, tx, change{
@@ -117,13 +117,19 @@ func (s *Store) AnnounceInstance(ctx context.Context, in AnnounceInput, actor st
 			next.Metadata = inst.Metadata
 		}
 		if next.OS == existing.OS && next.Arch == existing.Arch && maps.Equal(next.Metadata, existing.Metadata) {
+			// 内容没变也记下这次上报。不推进 revision，updated_at 仍表示内容何时变过。
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE instances SET last_announced_at = ? WHERE id = ?`, formatTime(now), existing.ID); err != nil {
+				return err
+			}
+			existing.LastAnnouncedAt = now
 			out = existing
 			return nil
 		}
 		if _, err := tx.ExecContext(ctx, `
-			UPDATE instances SET os = ?, arch = ?, metadata = ?, updated_at = ?, registered_by = ?
+			UPDATE instances SET os = ?, arch = ?, metadata = ?, updated_at = ?, last_announced_at = ?, registered_by = ?
 			WHERE id = ?`,
-			next.OS, next.Arch, encodeMap(next.Metadata), formatTime(now), actor, existing.ID); err != nil {
+			next.OS, next.Arch, encodeMap(next.Metadata), formatTime(now), formatTime(now), actor, existing.ID); err != nil {
 			return err
 		}
 		rev, err := recordChange(ctx, tx, change{
