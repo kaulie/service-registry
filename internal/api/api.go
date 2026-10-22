@@ -113,6 +113,8 @@ func (s *Server) Handler() http.Handler {
 	add(http.MethodGet, "/v1/namespaces/{ns}/services/{svc}/instances", s.handleListInstances)
 	add(http.MethodPut, "/v1/namespaces/{ns}/services/{svc}/instances", s.handleSyncInstances)
 	add(http.MethodPost, "/v1/namespaces/{ns}/services/{svc}/instances", s.handleCreateInstance)
+	// 服务启动时上报自己正在监听的地址。幂等，不摘掉同服务的其他实例。
+	add(http.MethodPut, "/v1/namespaces/{ns}/services/{svc}/announce", s.handleAnnounceInstance)
 	add(http.MethodGet, "/v1/namespaces/{ns}/services/{svc}/instances/{id}", s.handleGetInstance)
 	add(http.MethodPatch, "/v1/namespaces/{ns}/services/{svc}/instances/{id}", s.handlePatchInstance)
 	add(http.MethodDelete, "/v1/namespaces/{ns}/services/{svc}/instances/{id}", s.handleDeleteInstance)

@@ -626,6 +626,60 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
 
 
+  /v1/namespaces/{ns}/services/{svc}/announce:
+    put:
+      tags: [register]
+      summary: 服务上报自己的监听地址（幂等）
+      description: |
+        给正在运行的服务用：路径是「我是谁」，请求体至少给出 `port` 和机器 `os`。
+        `host` 省略时用这次连接的对端地址（本机进程连 `127.0.0.1` 时就是 `127.0.0.1`）。
+        `scheme` 省略时为 `http`。
+
+        按 `(scheme, host, port)` 对齐这一条实例：没有就新建（201），已有且内容没变就返回 200
+        且不推进 revision。不会摘掉同一服务的其他实例（整组对齐仍走 PUT `.../instances`）。
+        服务契约必须已经登记。这不是心跳，也没有 TTL。
+      parameters:
+        - $ref: '#/components/parameters/ns'
+        - $ref: '#/components/parameters/svc'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [port, os]
+              properties:
+                port: { type: integer, minimum: 1, maximum: 65535, example: 9099 }
+                host:
+                  type: string
+                  description: 省略时用请求对端地址
+                  example: 127.0.0.1
+                scheme: { type: string, enum: [http, https, tcp, tls], default: http }
+                os: { type: string, enum: [linux, mac, windows], description: 这台机器的操作系统 }
+                arch: { type: string, enum: [amd64, arm64, 386, arm] }
+                metadata: { type: object, additionalProperties: { type: string } }
+      responses:
+        '201':
+          description: 新建了这条实例
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  instance: { $ref: '#/components/schemas/Instance' }
+                  created: { type: boolean, example: true }
+        '200':
+          description: 同一地址已登记（内容未变，或只刷新了 os/arch/metadata）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  instance: { $ref: '#/components/schemas/Instance' }
+                  created: { type: boolean, example: false }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /v1/namespaces/{ns}/services/{svc}/instances:
     parameters:
       - $ref: '#/components/parameters/ns'
