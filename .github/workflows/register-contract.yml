@@ -4,9 +4,9 @@
 #   1) 把本仓库**手写的自述契约** api/openapi.yaml 上报成自己的服务契约；
 #   2) 顺手把实例（127.0.0.1:4240）按声明式对齐。
 #
-# 跑第一次之后，注册中心里 `service_registry` 那条就从"面板生成的最小模板（只有 /health，
-# 239 字节）"变成真实自述契约（api/openapi.yaml 里的全部端点）—— 契约的 specHash 没变化时
-# 脚本会跳过 PUT，所以天天跑也不会把变更表刷成噪声。
+# 端点索引由进程启动时写入：内嵌的 api/openapi.yaml 刷到 default/service_registry，
+# 只替换 spec 和端点，不动部门、owner、仓库地址和实例。原文 hash 没变就跳过。
+# 这个 workflow 仍负责把实例 127.0.0.1:4240 按声明式对齐；契约 hash 一致时脚本会跳过 PUT。
 #
 # ⚠️ 两个前提，缺一不可：
 #   1. **必须用能直连注册中心的 self-hosted runner**（部署机上的那个）——

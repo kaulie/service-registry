@@ -449,7 +449,7 @@ make run          # 本机起来试
 | workflow | 何时跑 | 做什么 |
 |---|---|---|
 | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | 每个 PR + push 到 `main`（GitHub-hosted） | `make lint`、`make test`（外加并发路径的 `-race`）、`make build` + `make panel-check`、`client/*.sh` 语法、`make panel-smoke`。**路由 ↔ 自述契约**的双向一致性检查也在 `make test` 里：新增接口忘了写进 `api/openapi.yaml`（或文档里留了个不存在的接口）会直接红 |
-| [`.github/workflows/register-contract.yml`](.github/workflows/register-contract.yml) | 手动（`workflow_dispatch`） | **自己登记自己**（dogfood）：把手写的自述契约 `api/openapi.yaml` 与实例 `127.0.0.1:4240` 上报给注册中心（幂等）。必须跑在能直连注册中心的 **self-hosted runner** 上 —— 注册中心只绑 `127.0.0.1`，GitHub-hosted runner 够不到；想随 `main` 自动跑就把该文件里的 `push:` 打开 |
+| [`.github/workflows/register-contract.yml`](.github/workflows/register-contract.yml) | 手动（`workflow_dispatch`） | 把实例 `127.0.0.1:4240` 按声明式对齐到自己名下。端点索引不靠这次上报：进程启动时会把内嵌的 `api/openapi.yaml` 写进 `default/service_registry`，原文没变则跳过。必须跑在能直连注册中心的 **self-hosted runner** 上 |
 
 > 其他服务怎么自动登记自己的契约（Go 用 swag 注解读代码生成、CI 一行命令上报）见
 > [`client/ci/README.md`](client/ci/README.md)。

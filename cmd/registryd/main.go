@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kaulie/service-registry/api"
 	"github.com/kaulie/service-registry/internal/api"
 	"github.com/kaulie/service-registry/internal/config"
 	"github.com/kaulie/service-registry/internal/metrics"
@@ -73,6 +74,25 @@ func main() {
 		if created {
 			log.Info("已播种默认命名空间", "namespace", cfg.DefaultNamespace)
 		}
+	}
+	ns := cfg.DefaultNamespace
+	if ns == "" {
+		ns = "default"
+		if _, err := st.EnsureNamespace(ctx, ns, "默认命名空间（启动时自动播种）"); err != nil {
+			cancel()
+			log.Error("播种默认命名空间失败", "err", err)
+			os.Exit(1)
+		}
+	}
+	published, err := st.PublishOwnContract(ctx, ns, "service_registry", openapi.Document, "self")
+	if err != nil {
+		cancel()
+		log.Error("写入自述契约失败", "err", err)
+		os.Exit(1)
+	}
+	if published.Created || published.Updated {
+		log.Info("已用自述契约刷新本服务的端点", "service", ns+"/service_registry",
+			"endpoints", published.Endpoints, "created", published.Created)
 	}
 	cancel()
 

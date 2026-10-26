@@ -84,6 +84,11 @@ Namespace（隔离域）
 幂等由客户端保证：先比规范原文的 sha256 与库里的 `specHash`，一致就跳过 PUT，
 所以"每次部署都上报"不会把变更表刷成噪声（revision 只在契约**真的**变了时才前进）。
 
+本服务自己的目录条目也走这条规则：启动时把内嵌的 `api/openapi.yaml` 写到
+`default/service_registry`（命名空间随 `REGISTRY_DEFAULT_NS`）。已经登记过的部门、
+owner、仓库地址和实例保持不动，只在原文 hash 变化时替换端点索引。这样面板上看到的
+就是当前二进制实际对外的接口，而不是当初面板预填的那一条 `/health`。
+
 ### 2.3 实例身份与声明式同步
 
 - 身份：显式 `id`（`inst_<ULID>`，字典序即时间序）或 `(scheme,host,port)` 的唯一约束。
