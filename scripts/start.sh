@@ -94,7 +94,11 @@ fi
 
 # 监听地址按端口推导（端口来源见脚本头的优先级说明；这也是服务契约 healthUrl 里的那个端口）。
 # 注意 .env 里即便写了旧的 REGISTRY_HTTP_ADDR 也不生效：契约换端口后不能被陈旧值卡住。
-export REGISTRY_HTTP_ADDR="${REGISTRY_BIND:-127.0.0.1}:${PORT}"
+# 部署默认绑 0.0.0.0：实例登记的是机器的可达地址（例如公网 IP:4240）时，只听 127.0.0.1
+# 会让这个地址从外面连不上。只想本机监听时显式设 REGISTRY_BIND=127.0.0.1。
+# 不经过本脚本直接跑二进制时，Go 侧默认仍是 127.0.0.1。
+# 写接口在 REGISTRY_WRITE_AUTH=open 时只对回环/内网匿名放行；公网来源仍要令牌。
+export REGISTRY_HTTP_ADDR="${REGISTRY_BIND:-0.0.0.0}:${PORT}"
 export REGISTRY_DB_PATH="${REGISTRY_DB_PATH:-${DATA_DIR}/registry.db}"
 
 # 写接口默认开放（与代码默认一致）；显式导出，避免 .env 里没写时行为不明。

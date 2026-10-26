@@ -28,9 +28,10 @@ type Config struct {
 	AdminToken string
 	// WriteAuthOpen 为真时**写接口默认开放**：不带令牌也能登记/维护/管理。
 	//
-	// 这是刻意的默认值（本机/内网先把链路跑通），代价是任何人都能往唯一的
-	// 元信息真源里写数据 —— 所以启动时会有 WARN，/v1/meta 会暴露 writeAuth，
-	// 面板也会显示徽标。生产请设 REGISTRY_WRITE_AUTH=token。
+	// 这是刻意的默认值（本机/内网先把链路跑通）。匿名写入只认回环和内网地址；
+	// 公网来源即使开着 open 也要令牌，避免进程绑到 0.0.0.0 之后被投毒。
+	// 启动时会有 WARN，/v1/meta 会暴露 writeAuth，面板也会显示徽标。
+	// 连内网也要收紧时设 REGISTRY_WRITE_AUTH=token。
 	//
 	// 开放不等于完全不认令牌：若请求带了合法令牌，仍然按 admin / namespace 记账
 	// （审计里能看出是谁改的）；带了**非法**令牌则一律 403（不静默忽略）。

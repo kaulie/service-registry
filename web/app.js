@@ -82,8 +82,13 @@ async function renderOverview() {
   if (m.writeAuth === 'open') {
     wa.textContent = '写接口开放（无需令牌）';
     wa.className = 'badge badge--warn';
-    wa.title = 'REGISTRY_WRITE_AUTH=open：任何人都能登记/修改/删除元信息。'
-      + '收紧方式：backend/.env 里改成 token 后重启。';
+    wa.title = 'REGISTRY_WRITE_AUTH=open：本机与内网可以不带令牌登记/修改/删除元信息。'
+      + '公网来源仍要令牌。收紧方式：backend/.env 里改成 token 后重启。';
+  } else if (m.writeAuthScope === 'public') {
+    wa.textContent = '公网写接口需令牌';
+    wa.className = 'badge badge--ok';
+    wa.title = '这次访问来自公网：写入需要 admin 或命名空间令牌。'
+      + '本机与内网在 REGISTRY_WRITE_AUTH=open 下仍可匿名写。';
   } else {
     wa.textContent = '写接口需令牌';
     wa.className = 'badge badge--ok';

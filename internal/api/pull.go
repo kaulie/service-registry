@@ -129,8 +129,15 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeAuth := "token"
+	writeAuthScope := "all"
 	if s.cfg.WriteAuthOpen {
-		writeAuth = "open"
+		if trustedWriteClient(r) {
+			writeAuth = "open"
+			writeAuthScope = "private"
+		} else {
+			// 配置仍是 open，但这次请求来自公网：对这个调用方，写入要令牌。
+			writeAuthScope = "public"
+		}
 	}
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"service":          "service-registry",
@@ -140,6 +147,7 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 		"revision":         rev,
 		"counts":           counts,
 		"writeAuth":        writeAuth,
+		"writeAuthScope":   writeAuthScope,
 		"readAuthRequired": s.cfg.ReadAuthRequired,
 		"defaultNamespace": s.cfg.DefaultNamespace,
 		// 部门属性的数据来源（组织接口）。面板/运维靠它判断"部门下拉为什么是空的"。
