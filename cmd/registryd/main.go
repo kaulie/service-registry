@@ -102,8 +102,8 @@ func main() {
 
 	if cfg.WriteAuthOpen {
 		// 刻意默认、但必须显眼：开放的写接口意味着任何人都能往唯一的元信息真源里写数据。
-		log.Warn("写接口未鉴权（REGISTRY_WRITE_AUTH=open）：任何人只要连得上就能登记/修改/删除服务元信息；" +
-			"需要收紧时设 REGISTRY_WRITE_AUTH=token 并重启")
+		log.Warn("写接口对回环/内网未鉴权（REGISTRY_WRITE_AUTH=open）：这些来源不带令牌就能登记/修改/删除服务元信息；" +
+			"公网来源仍要令牌。连内网也要收紧时设 REGISTRY_WRITE_AUTH=token 并重启")
 	}
 	if cfg.ReadAuthRequired {
 		log.Info("读接口要求令牌（REGISTRY_READ_AUTH=token）：各平台拉取时需带令牌")

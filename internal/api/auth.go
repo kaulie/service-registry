@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
+	"net"
 	"net/http"
 	"strings"
 )
@@ -26,7 +27,9 @@ type role struct {
 // 顺序（每一层都有明确语义）：
 //  1. 带的令牌合法 → 按 admin / namespace 记账（审计里能看出是谁改的）；
 //  2. 带了令牌但**非法** → 403（不静默忽略一个错误的令牌）；
-//  3. 写接口且写权限开放（REGISTRY_WRITE_AUTH=open，默认）→ 放行，actor=anonymous；
+//  3. 写接口且写权限开放（REGISTRY_WRITE_AUTH=open，默认），并且来源是回环或内网
+//     → 放行，actor=anonymous。公网来源不走这条：开放写入只覆盖本机/内网，
+//     避免监听 0.0.0.0 之后任何人都能改唯一真源。
 //  4. 读接口且未要求鉴权 → 放行，actor=reader；
 //  5. 其余：没令牌 401、令牌不够权 403。
 func (s *Server) authorize(r *http.Request, namespace string, needWrite bool) (role, int, string) {
@@ -47,9 +50,10 @@ func (s *Server) authorize(r *http.Request, namespace string, needWrite bool) (r
 		return role{}, http.StatusForbidden, "令牌无效，或无权操作该命名空间"
 	}
 
-	if needWrite && s.cfg.WriteAuthOpen {
+	if needWrite && s.cfg.WriteAuthOpen && trustedWriteClient(r) {
 		// 写权限开放：连管理接口（建命名空间、轮换令牌）也放行，
 		// 但 actor 记为 anonymous，审计里能看出"这是没带令牌的写入"。
+		// 只对回环/内网生效；公网来源落到下面的 401。
 		return role{admin: true, actor: "anonymous"}, 0, ""
 	}
 	if !needWrite && !s.cfg.ReadAuthRequired {
@@ -108,6 +112,22 @@ func codeForStatus(status int) string {
 	default:
 		return "error"
 	}
+}
+
+// trustedWriteClient 判断这次请求能不能享受「写接口开放」。
+// 只认 TCP 对端地址（RemoteAddr），不看 X-Forwarded-For：那个头可以被调用方伪造。
+// 回环、RFC1918/ULA、链路本地算本机或内网；公网地址不算。解析失败时拒绝，避免空地址被当成可信。
+func trustedWriteClient(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	if err != nil {
+		host = strings.TrimSpace(r.RemoteAddr)
+	}
+	host = strings.Trim(host, "[]")
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
 }
 
 func bearerToken(r *http.Request) string {

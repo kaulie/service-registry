@@ -1,7 +1,10 @@
 package api
 
 import (
+	"bytes"
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/kaulie/service-registry/internal/config"
@@ -104,6 +107,103 @@ func TestOpenWriteAuth(t *testing.T) {
 	// /v1/meta 暴露当前写权限状态，便于运维与面板显示。
 	if meta := e.ok(t, http.MethodGet, "/v1/meta", nil); meta["writeAuth"] != "open" {
 		t.Fatalf("meta.writeAuth 应为 open：%v", meta["writeAuth"])
+	}
+}
+
+// TestOpenWriteAuthRejectsPublicClients 覆盖「开放写入只对回环/内网生效」：
+// 部署脚本把进程绑到 0.0.0.0 之后，公网来源不带令牌不能改元信息，读接口仍然开放。
+func TestOpenWriteAuthRejectsPublicClients(t *testing.T) {
+	e := newEnv(t, func(c *config.Config) { c.WriteAuthOpen = true })
+
+	public := func(method, path, token string, body any) (int, map[string]any) {
+		t.Helper()
+		var reader *bytes.Reader
+		if body != nil {
+			raw, err := json.Marshal(body)
+			if err != nil {
+				t.Fatalf("序列化请求体失败：%v", err)
+			}
+			reader = bytes.NewReader(raw)
+		}
+		var req *http.Request
+		var err error
+		if reader != nil {
+			req, err = http.NewRequest(method, path, reader)
+		} else {
+			req, err = http.NewRequest(method, path, nil)
+		}
+		if err != nil {
+			t.Fatalf("构造请求失败：%v", err)
+		}
+		req.RemoteAddr = "203.0.113.9:50000"
+		if body != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		if token != "" {
+			req.Header.Set("X-Registry-Token", token)
+		}
+		rr := httptest.NewRecorder()
+		e.ts.Config.Handler.ServeHTTP(rr, req)
+		out := map[string]any{}
+		if len(bytes.TrimSpace(rr.Body.Bytes())) > 0 {
+			if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+				out = map[string]any{"raw": rr.Body.String()}
+			}
+		}
+		return rr.Code, out
+	}
+
+	if status, out := public(http.MethodPost, "/v1/namespaces", "", map[string]any{"name": "from-public"}); status != http.StatusUnauthorized {
+		t.Fatalf("公网匿名写应 401，实际 %d：%v", status, out)
+	}
+	if status, out := public(http.MethodGet, "/v1/services", "", nil); status != http.StatusOK {
+		t.Fatalf("公网读应仍然开放，实际 %d：%v", status, out)
+	}
+	if status, out := public(http.MethodGet, "/v1/meta", "", nil); status != http.StatusOK || out["writeAuth"] != "token" || out["writeAuthScope"] != "public" {
+		t.Fatalf("公网 meta 应标明写入要令牌：%d %v", status, out)
+	}
+	if status, out := public(http.MethodPost, "/v1/namespaces", testAdminToken, map[string]any{"name": "from-public"}); status != http.StatusCreated {
+		t.Fatalf("公网带 admin 令牌应能写，实际 %d：%v", status, out)
+	}
+
+	// 内网来源仍按 open 放行，面板徽标也保持「开放」。
+	req := httptest.NewRequest(http.MethodGet, "/v1/meta", nil)
+	req.RemoteAddr = "192.168.3.20:1234"
+	rr := httptest.NewRecorder()
+	e.ts.Config.Handler.ServeHTTP(rr, req)
+	var meta map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &meta); err != nil {
+		t.Fatalf("解析 meta：%v", err)
+	}
+	if meta["writeAuth"] != "open" || meta["writeAuthScope"] != "private" {
+		t.Fatalf("内网 meta 应仍是开放写入：%v", meta)
+	}
+}
+
+func TestTrustedWriteClient(t *testing.T) {
+	cases := []struct {
+		addr string
+		ok   bool
+	}{
+		{"127.0.0.1:4240", true},
+		{"[::1]:4240", true},
+		{"[::ffff:127.0.0.1]:9", true},
+		{"10.0.0.8:1", true},
+		{"192.168.3.107:50000", true},
+		{"172.17.0.1:40000", true},
+		{"169.254.1.1:1", true},
+		{"203.0.113.9:50000", false},
+		{"8.8.8.8:53", false},
+		{"[::ffff:8.8.8.8]:9", false},
+		{"", false},
+		{"not-an-ip", false},
+	}
+	for _, tc := range cases {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = tc.addr
+		if got := trustedWriteClient(req); got != tc.ok {
+			t.Errorf("RemoteAddr %q：期望 trusted=%v，实际 %v", tc.addr, tc.ok, got)
+		}
 	}
 }
 

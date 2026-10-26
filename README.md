@@ -322,7 +322,7 @@ toast / 部门目录 / 表单反馈），各自只放自己的逻辑：
 - **收紧只需一步**：`backend/.env` 里把 `REGISTRY_WRITE_AUTH` 改成 `token` 再重启，
   客户端带 admin 或命名空间令牌即可 —— 令牌早就在 `.env` 里生成了，不用重新分发；
 - 读接口可用 `REGISTRY_READ_AUTH=token` 单独收紧；`/health` `/healthz` `/readyz` `/metrics` 始终开放。
-- 令牌只存 sha256 哈希，明文仅在创建/轮换时返回一次；服务绑定 `127.0.0.1`，不对外网暴露。
+- 令牌只存 sha256 哈希，明文仅在创建/轮换时返回一次。`REGISTRY_WRITE_AUTH=open` 的匿名写入只对回环和内网生效；公网来源要令牌。部署脚本 `scripts/start.sh` 默认绑定 `0.0.0.0`，这样登记在公网地址上的实例可以从外面打开。
 - `DELETE /v1/namespaces/{ns}?confirm={ns}` 才允许删除命名空间（连带其服务、实例与 agent MCP 服务）。
 
 ## API 一览
@@ -369,7 +369,7 @@ toast / 部门目录 / 表单反馈），各自只放自己的逻辑：
 | `SERVICE_PORT` | 空 | **本服务监听端口**（优先级高于 `PORT`）。读不到就用 `PORT`，再读不到用 `4240`。非法值（非 1-65535 整数）启动即失败 |
 | `PORT` | 空 | 平台/容器常用的通用端口变量；只有 `SERVICE_PORT` 读不到时才用它 |
 | `REGISTRY_HTTP_ADDR` | 空 | 完整监听地址（如 `127.0.0.1:4240`）；给了它就不再关心上面的端口变量（优先级最高） |
-| `REGISTRY_BIND` | `127.0.0.1` | 未显式给地址时用的绑定 IP（端口仍来自 `SERVICE_PORT`/`PORT`） |
+| `REGISTRY_BIND` | `127.0.0.1`（二进制）/ `0.0.0.0`（`scripts/start.sh`） | 未显式给地址时用的绑定 IP（端口仍来自 `SERVICE_PORT`/`PORT`）。部署脚本默认 `0.0.0.0`，让公网地址打得开；只听本机时设 `127.0.0.1` |
 | `REGISTRY_DB_PATH` | `./data/registry.db` | SQLite 路径（`:memory:` 用于测试）。设了 `REGISTRY_POSTGRES_DSN` 时，读写不再用它；库还是空的时候，它是一次性导入来源 |
 | `REGISTRY_POSTGRES_DSN` | 空 | PostgreSQL 连接串。部署平台写在服务契约的 `runtimeEnv` 里（键名同此），`scripts/start.sh` 让这份注入优先于 `backend/.env`。非空时读写都走这库 |
 | `REGISTRY_ADMIN_TOKEN` | 空* | admin 令牌；合法令牌会被记入审计（`actor=admin`） |
